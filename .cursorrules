@@ -1,0 +1,62 @@
+# E-Paper Dashboard Project Rules
+
+## Project Purpose
+This project is a **static webpage designed for a monochrome e-paper display** with **800x480 resolution**. The application fetches data from external sources (APIs or web scraping) and generates an updated webpage that displays current information. The e-paper device loads the webpage every 5-10 minutes.
+
+## Display Constraints
+- **Resolution**: 800x480 pixels (fixed viewport)
+- **Colors**: Monochrome only (black and white)
+- **Refresh Rate**: Device updates every 5-10 minutes
+- **Display Type**: E-paper (e-ink) with slow refresh and ghosting considerations
+
+## Implementation Guidelines
+
+### Design Principles
+1. **High Contrast**: Use pure black (#000000) and white (#FFFFFF) only
+2. **Minimalist Layout**: Simple, clean design with clear information hierarchy
+3. **Large Typography**: Prioritize readability at a glance (minimum 16px for body text)
+4. **No Animations**: E-paper displays don't handle animations well
+5. **Static Content**: No interactive elements (clicks, hovers) needed
+6. **Fixed Dimensions**: Design for exactly 800x480px viewport
+
+### Technical Requirements
+1. **Data Fetching**: 
+   - Implement server-side data fetching from APIs or web scraping
+   - Cache data appropriately to avoid rate limiting
+   - Handle errors gracefully with fallback content
+
+2. **Performance**:
+   - Minimize HTML size (e-paper devices often have limited resources)
+   - Inline critical CSS to reduce requests
+   - Optimize images for 1-bit depth (pure black/white)
+   - Keep total page size under 500KB
+
+3. **Reliability**:
+   - Always generate valid HTML even if data fetch fails
+   - Include timestamp of last update on the page
+   - Implement timeout handling for external requests
+
+4. **Styling Best Practices**:
+   - Use system fonts or minimal web fonts
+   - Avoid gradients, shadows, and transparency
+   - Use borders and spacing for visual separation
+   - Test with grayscale conversion
+
+### Code Structure
+- Keep Express routes simple and focused on data aggregation
+- Separate data fetching logic from rendering logic
+- Use TypeScript for type safety
+- Implement proper error handling and logging
+- Consider rate limiting and caching strategies
+
+### Content Guidelines
+- Display only essential, actionable information
+- Update timestamps should be visible
+- Show clear indicators for stale or missing data
+- Prioritize information density while maintaining readability
+
+## Common Tasks
+- When adding new data sources: Implement caching and error handling
+- When styling: Test in pure black and white (no grays)
+- When adding content: Consider 800x480 viewport constraints
+- When optimizing: Focus on payload size and server-side rendering speed
