@@ -60,3 +60,63 @@ This project is a **static webpage designed for a monochrome e-paper display** w
 - When styling: Test in pure black and white (no grays)
 - When adding content: Consider 800x480 viewport constraints
 - When optimizing: Focus on payload size and server-side rendering speed
+
+---
+
+## Architectural Principles (E-Paper App / Vercel Adaptation)
+
+This section documents the core architectural patterns established during the server-side rendering and Vercel adaptation refactoring. These principles ensure the app remains compatible with both e-paper display requirements and Vercel's serverless execution model.
+
+### Rendering Model
+
+1. **Fully Server-Side Rendered**: All HTML must be generated on the server with data already embedded. The client receives complete, static HTML.
+2. **No Client-Side Async Loading**: Browser-side `fetch()`, `XHR`, `WebSocket`, or any asynchronous data loading is forbidden. The page must render instantly without JavaScript execution.
+3. **SVG for Charts and Graphics**: Use inline SVG for charts and visualizations. Do not rely on client-side charting libraries (e.g., Chart.js). SVG renders correctly on e-paper without JavaScript.
+
+### Caching Strategy
+
+1. **In-Memory Cache with Timestamps**: All external data must be stored in the server-side cache (`src/cache.ts`) with a `fetchedAt` timestamp.
+2. **Staleness Detection**: Use `isWeatherStale()` and `isFxStale()` functions to check if cached data has exceeded its expiration window.
+3. **Configurable Expiration Windows**: Define refresh intervals in `src/config.ts`. These values serve as cache expiration thresholds, not as actual timer intervals on Vercel.
+4. **Graceful Degradation**: If data fetch fails, preserve the last successful cache entry and set an error flag. Always render valid HTML.
+
+### Vercel Serverless Compatibility
+
+1. **No Long-Running Processes**: Vercel functions are stateless and short-lived. Do not use `setInterval`, `setTimeout` loops, or persistent background jobs in production.
+2. **Lazy Refresh Pattern**: On each request, check if cached data is stale. If so, fetch fresh data before rendering. This replaces interval-based background workers.
+3. **Background Workers for Local Dev Only**: The `startBackgroundWorkers()` function should only execute when `process.env.VERCEL` is falsy. This provides a better local development experience.
+4. **Concurrent Fetch Protection**: Track in-flight fetch promises to prevent duplicate API calls when multiple requests arrive simultaneously.
+5. **Explicit Type Annotations**: When exporting the Express app, use `const app: Application = express()` to avoid TypeScript portability errors (TS2742).
+
+### Data Fetching
+
+1. **Centralized Fetcher Module**: All external API calls must go through `src/data-fetchers.ts`. Do not scatter fetch logic across route handlers.
+2. **Timeout Handling**: Use `AbortController` with timeouts (8 seconds recommended) to prevent hanging requests.
+3. **Error Isolation**: Catch and log errors in fetchers. Store error messages in cache for display. Never let a failed fetch crash the server.
+4. **Independent Refresh Intervals**: Each data source has its own expiration window. Weather and FX rates refresh independently.
+
+### Module Structure
+
+| Module | Responsibility |
+|--------|----------------|
+| `src/config.ts` | Refresh intervals, API endpoints, and configuration constants |
+| `src/cache.ts` | In-memory data storage, getters/setters, staleness checks |
+| `src/data-fetchers.ts` | External API calls, lazy refresh logic, background workers |
+| `src/template.ts` | HTML generation from cached data |
+| `src/index.ts` | Express routes, middleware, server startup |
+| `api/index.ts` | Vercel serverless entry point (re-exports Express app) |
+
+### Development Parity
+
+1. **Local and Production Must Behave Identically**: The rendered output should be the same whether running `pnpm dev` or deployed to Vercel.
+2. **Use `vercel dev` for Testing**: When testing Vercel-specific behavior locally, use `vercel dev` to simulate the serverless environment.
+3. **Environment Detection**: Use `process.env.VERCEL` to conditionally enable local-only features (background workers, dev server listening).
+
+### Prohibited Patterns
+
+- ❌ Client-side JavaScript for data fetching
+- ❌ Dynamic imports or lazy-loaded components in the browser
+- ❌ `setInterval` or `setTimeout` in Vercel production code
+- ❌ External state stores (Redis, databases) unless explicitly required
+- ❌ Heavy frameworks (React, Vue, Next.js) — keep it lightweight Express + templates
+- ❌ Modifying templates or markup without preserving existing structure and comments
