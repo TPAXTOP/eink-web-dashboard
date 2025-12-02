@@ -2,6 +2,9 @@ import express from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
+import { startBackgroundWorkers, stopBackgroundWorkers, ensureFreshData } from './data-fetchers.js'
+import { renderDashboard } from './template.js'
+import * as cache from './cache.js'
 
 const require = createRequire(import.meta.url)
 
@@ -133,11 +136,15 @@ const parseFxPayload = (payload: unknown) => {
   throw new Error('FX payload missing rates or quotes data')
 }
 
-app.use(express.static(publicDir))
+// Serve static files (CSS, images, etc.) but NOT index.html
+app.use(express.static(publicDir, { index: false }))
 
-// Home route - HTML
-app.get('/', (req, res) => {
-  res.sendFile(path.join(publicDir, 'index.html'))
+// Home route - Server-side rendered HTML with cached data
+app.get('/', async (_req, res) => {
+  // Ensure data is fresh (lazy refresh for Vercel compatibility)
+  await ensureFreshData()
+  const html = renderDashboard()
+  res.type('html').send(html)
 })
 
 app.get('/about', function (req, res) {
@@ -153,6 +160,22 @@ app.get('/api-data', (req, res) => {
 })
 
 app.get('/api/fx', async (_req, res) => {
+  // Return cached data if available
+  const cachedFx = cache.getFx()
+  if (cachedFx) {
+    return res.json({
+      points: cachedFx.points,
+      meta: {
+        latest: cachedFx.latest,
+        min: cachedFx.min,
+        max: cachedFx.max,
+        source: cachedFx.source,
+        refreshedAt: cachedFx.fetchedAt,
+      },
+    })
+  }
+
+  // Fallback to live fetch if cache is empty
   const apiKey = process.env.EXCHANGERATE_API_KEY
   if (!apiKey) {
     logFx('Missing EXCHANGERATE_API_KEY env')
@@ -217,5 +240,35 @@ app.get('/api/fx', async (_req, res) => {
 app.get('/healthz', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
 })
+
+// Vercel serverless: Use lazy refresh (no background workers needed)
+// Local development: Start background workers for better DX
+if (!process.env.VERCEL) {
+  // Start background workers when server starts (local dev only)
+  startBackgroundWorkers().catch((err) => {
+    console.error('[server] Failed to start background workers', err)
+  })
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('[server] SIGTERM received, shutting down')
+    stopBackgroundWorkers()
+    process.exit(0)
+  })
+
+  process.on('SIGINT', () => {
+    console.log('[server] SIGINT received, shutting down')
+    stopBackgroundWorkers()
+    process.exit(0)
+  })
+
+  // Start server for local development
+  const port = process.env.PORT || 3000
+  app.listen(port, () => {
+    console.log(`[server] Listening on http://localhost:${port}`)
+  })
+} else {
+  console.log('[server] Running in Vercel serverless mode (lazy refresh)')
+}
 
 export default app
