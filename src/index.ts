@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { startBackgroundWorkers, stopBackgroundWorkers, ensureFreshData } from './data-fetchers.js'
 import { renderDashboard } from './template.js'
+import { renderPanel } from './panel-template.js'
 import * as cache from './cache.js'
 
 const require = createRequire(import.meta.url)
@@ -149,6 +150,12 @@ app.get('/', async (_req, res) => {
 
 app.get('/about', function (req, res) {
   res.sendFile(path.join(__dirname, '..', 'components', 'about.htm'))
+})
+
+// E-Paper Panel route - Server-rendered static dashboard for 800x480 e-paper display
+app.get('/panel', (_req, res) => {
+  const html = renderPanel()
+  res.type('html').send(html)
 })
 
 // Example API endpoint - JSON
