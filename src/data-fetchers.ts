@@ -200,6 +200,10 @@ const parseFxPayload = (payload: unknown): FxPoint[] => {
  */
 export const fetchFx = async (): Promise<boolean> => {
   const apiKey = process.env.EXCHANGERATE_API_KEY
+
+  // Record attempt before any early exits to enforce retry interval
+  cache.recordFxFetchAttempt()
+
   if (!apiKey) {
     logImportant('fx', '⚠ Missing EXCHANGERATE_API_KEY env - skipping FX fetch')
     cache.setFxError('Exchange rate API key not configured')
@@ -207,9 +211,6 @@ export const fetchFx = async (): Promise<boolean> => {
   }
 
   logImportant('fx', '→ Fetching FX data from API')
-
-  // Record attempt BEFORE making the request (rate limiting)
-  cache.recordFxFetchAttempt()
 
   try {
     const end = new Date()
