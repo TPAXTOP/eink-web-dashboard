@@ -1,13 +1,55 @@
+/**
+ * Express application entry point.
+ *
+ * ARCHITECTURE (Vercel Serverless Compatible):
+ * - Cold start with empty cache: BLOCKING initial fetch (wait for data)
+ * - Warm requests with cached data: NON-BLOCKING background refresh
+ * - All routes serve cached data (never call APIs directly in handlers)
+ * - Data fetching centralized in data-fetchers.ts
+ */
+
 import express, { Application } from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
-import { startBackgroundWorkers, stopBackgroundWorkers, ensureFreshData } from './data-fetchers.js'
+import {
+  startBackgroundWorkers,
+  stopBackgroundWorkers,
+  triggerBackgroundRefresh,
+  ensureInitialData,
+} from './data-fetchers.js'
 import { renderDashboard } from './template.js'
+import { renderPanel } from './panel-template.js'
 import * as cache from './cache.js'
+import { loggingConfig } from './config.js'
+import { formatKyivDateTimeForLog } from './time-utils.js'
 
 const require = createRequire(import.meta.url)
 
+// =============================================================================
+// Logging Helpers
+// =============================================================================
+
+const getTimestamp = () => formatKyivDateTimeForLog()
+
+const log = (...args: unknown[]) => {
+  if (loggingConfig.verbose) {
+    console.log('[server]', getTimestamp(), ...args)
+  }
+}
+
+const logImportant = (...args: unknown[]) => {
+  console.log('[server]', getTimestamp(), ...args)
+}
+
+// =============================================================================
+// Environment Setup
+// =============================================================================
+
+/**
+ * Load environment variables from .env file if not already set.
+ * Only used in local development; Vercel injects env vars automatically.
+ */
 const hydrateEnvFromDotenv = () => {
   if (process.env.EXCHANGERATE_API_KEY) {
     return
@@ -33,134 +75,95 @@ const __dirname = path.dirname(__filename)
 const app: Application = express()
 const publicDir = path.join(__dirname, '..', 'public')
 
-type FxPoint = {
-  date: string
-  value: number
-}
-
-const toIsoDate = (date: Date) => date.toISOString().split('T')[0]
-
-const FX_BASE_URL = 'https://api.exchangerate.host/timeframe'
-
-const logFx = (...args: unknown[]) => {
-  console.log('[fx]', ...args)
-}
-
-const buildFxUrl = (startDate: string, endDate: string, apiKey: string) => {
-  const url = new URL(FX_BASE_URL)
-  url.searchParams.set('base', 'USD')
-  url.searchParams.set('symbols', 'UAH')
-  url.searchParams.set('start_date', startDate)
-  url.searchParams.set('end_date', endDate)
-  url.searchParams.set('source', 'USD')
-  url.searchParams.set('places', '4')
-  url.searchParams.set('amount', '1')
-  url.searchParams.set('access_key', apiKey)
-  return url.toString()
-}
-
-const pickQuoteValue = (quoteRecord: Record<string, unknown>, targetPair: string) => {
-  const direct = quoteRecord[targetPair]
-  if (typeof direct === 'number') {
-    return direct
-  }
-
-  const fallbackKey = Object.keys(quoteRecord).find((key) => key.endsWith('UAH'))
-  const fallbackValue = fallbackKey ? quoteRecord[fallbackKey] : undefined
-  return typeof fallbackValue === 'number' ? fallbackValue : undefined
-}
-
-const parseFxPayload = (payload: unknown) => {
-  logFx('Parsing FX payload snapshot', typeof payload)
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('FX payload missing')
-  }
-
-  const record = payload as {
-    success?: boolean
-    error?: { type?: string; info?: string }
-    rates?: Record<string, { UAH?: number }>
-    quotes?: Record<string, number | Record<string, unknown>>
-    timestamp?: number
-  }
-
-  if (record.success === false) {
-    throw new Error(record.error?.info || 'FX upstream reported an error')
-  }
-
-  if (record.rates) {
-    logFx('Found rates field with keys', Object.keys(record.rates).length)
-    const points: FxPoint[] = Object.keys(record.rates)
-      .sort()
-      .map((dateKey) => ({
-        date: dateKey,
-        value: record.rates?.[dateKey]?.UAH,
-      }))
-      .filter((point): point is FxPoint => typeof point.value === 'number')
-
-    if (points.length) {
-      return points
-    }
-  }
-
-  if (record.quotes) {
-    const targetPair = 'USDUAH'
-    const quotes = record.quotes
-    const points: FxPoint[] = []
-
-    for (const [outerKey, outerValue] of Object.entries(quotes)) {
-      if (typeof outerValue === 'number') {
-        if (outerKey === targetPair) {
-          const date =
-            typeof record.timestamp === 'number'
-              ? new Date(record.timestamp * 1000).toISOString().split('T')[0]
-              : toIsoDate(new Date())
-          points.push({ date, value: outerValue })
-        }
-        continue
-      }
-
-      if (outerValue && typeof outerValue === 'object') {
-        const value = pickQuoteValue(outerValue, targetPair)
-        if (typeof value === 'number') {
-          points.push({ date: outerKey, value })
-        }
-      }
-    }
-
-    if (points.length) {
-      return points.sort((a, b) => (a.date < b.date ? -1 : 1))
-    }
-  }
-
-  throw new Error('FX payload missing rates or quotes data')
-}
-
 // Serve static files (CSS, images, etc.) but NOT index.html
 app.use(express.static(publicDir, { index: false }))
 
-// Home route - Server-side rendered HTML with cached data
+// =============================================================================
+// Main Routes
+// =============================================================================
+
+/**
+ * Home route - Server-side rendered HTML with cached data.
+ *
+ * BEHAVIOR:
+ * - If cache is empty (cold start): WAIT for initial data fetch
+ * - If cache has data: Render immediately, refresh in background
+ */
 app.get('/', async (_req, res) => {
-  // Ensure data is fresh (lazy refresh for Vercel compatibility)
-  await ensureFreshData()
+  log('GET / - rendering dashboard')
+
+  // Ensure we have data to show (blocking on cold start, non-blocking otherwise)
+  await ensureInitialData()
+
+  // Trigger background refresh for stale data (non-blocking)
+  triggerBackgroundRefresh()
+
+  // Render with current cached data
   const html = renderDashboard()
+  log('Sending HTML response', { length: html.length })
   res.type('html').send(html)
 })
 
-app.get('/about', function (req, res) {
+/**
+ * About page - Static HTML file.
+ */
+app.get('/about', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'components', 'about.htm'))
 })
 
-// Example API endpoint - JSON
-app.get('/api-data', (req, res) => {
+/**
+ * E-Paper Panel route - Server-rendered static dashboard for 800x480 e-paper display.
+ *
+ * BEHAVIOR:
+ * - If cache is empty (cold start): WAIT for initial data fetch
+ * - If cache has data: Render immediately, refresh in background
+ */
+app.get('/panel', async (_req, res) => {
+  log('GET /panel - rendering e-paper panel')
+
+  // Ensure we have data to show (blocking on cold start, non-blocking otherwise)
+  await ensureInitialData()
+
+  // Trigger background refresh for stale data (non-blocking)
+  triggerBackgroundRefresh()
+
+  // Render with current cached data
+  const html = renderPanel()
+  log('Sending panel HTML response', { length: html.length })
+  res.type('html').send(html)
+})
+
+// =============================================================================
+// API Endpoints
+// =============================================================================
+
+/**
+ * Sample API endpoint - static JSON data.
+ */
+app.get('/api-data', (_req, res) => {
   res.json({
     message: 'Here is some sample API data',
     items: ['apple', 'banana', 'cherry'],
   })
 })
 
+/**
+ * FX data API endpoint - returns cached exchange rate data.
+ *
+ * CACHE-ONLY: Never fetches from external API directly.
+ * Returns cached data if available, or error if cache is empty.
+ * Background refresh is triggered if data is stale.
+ */
 app.get('/api/fx', async (_req, res) => {
-  // Return cached data if available
+  log('GET /api/fx')
+
+  // Ensure we have data (blocking on cold start)
+  await ensureInitialData()
+
+  // Trigger background refresh if stale (non-blocking)
+  triggerBackgroundRefresh()
+
+  // Return cached data
   const cachedFx = cache.getFx()
   if (cachedFx) {
     return res.json({
@@ -175,89 +178,92 @@ app.get('/api/fx', async (_req, res) => {
     })
   }
 
-  // Fallback to live fetch if cache is empty
-  const apiKey = process.env.EXCHANGERATE_API_KEY
-  if (!apiKey) {
-    logFx('Missing EXCHANGERATE_API_KEY env')
-    return res
-      .status(503)
-      .json({ error: 'Exchange rate API key missing. Set EXCHANGERATE_API_KEY.' })
-  }
+  // No cached data available
+  const error = cache.getFxError()
+  return res.status(503).json({
+    error: error || 'Exchange rate data not yet available. Please try again shortly.',
+    hint: 'Data is fetched in the background. Refresh the page in a few seconds.',
+  })
+})
 
-  try {
-    const end = new Date()
-    const start = new Date(end)
-    start.setDate(end.getDate() - 29)
+/**
+ * Weather data API endpoint - returns cached weather data.
+ *
+ * CACHE-ONLY: Never fetches from external API directly.
+ * Returns cached data if available, or error if cache is empty.
+ */
+app.get('/api/weather', async (_req, res) => {
+  log('GET /api/weather')
 
-    const requestUrl = buildFxUrl(toIsoDate(start), toIsoDate(end), apiKey)
-    logFx('Requesting rates', { start: toIsoDate(start), end: toIsoDate(end), url: requestUrl })
+  // Ensure we have data (blocking on cold start)
+  await ensureInitialData()
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8000)
+  // Trigger background refresh if stale (non-blocking)
+  triggerBackgroundRefresh()
 
-    const upstreamResponse = await fetch(requestUrl, {
-      signal: controller.signal,
-    })
-
-    clearTimeout(timeout)
-
-    if (!upstreamResponse.ok) {
-      const text = await upstreamResponse.text()
-      logFx('Upstream error response', { status: upstreamResponse.status, body: text })
-      throw new Error(`FX upstream responded with ${upstreamResponse.status}`)
-    }
-
-    const payload = await upstreamResponse.json().catch((error) => {
-      throw new Error(`FX payload parsing failed: ${error instanceof Error ? error.message : error}`)
-    })
-
-    const points = parseFxPayload(payload)
-    const values = points.map((point) => point.value)
-    const latest = points[points.length - 1]
-
-    logFx('Received FX data', {
-      points: points.length,
-      preview: points.slice(-3),
-    })
-
+  // Return cached data
+  const cachedWeather = cache.getWeather()
+  if (cachedWeather) {
     return res.json({
-      points,
-      meta: {
-        latest,
-        min: Math.min(...values),
-        max: Math.max(...values),
-        source: 'exchangerate.host',
-        refreshedAt: new Date().toISOString(),
-      },
+      temperature: cachedWeather.temperature,
+      humidity: cachedWeather.humidity,
+      windSpeed: cachedWeather.windSpeed,
+      weatherCode: cachedWeather.weatherCode,
+      time: cachedWeather.time,
+      refreshedAt: cachedWeather.fetchedAt,
     })
-  } catch (error) {
-    console.error('Failed to fetch FX data', error)
-    return res.status(502).json({ error: 'Unable to load exchange rate data right now.' })
   }
+
+  // No cached data available
+  const error = cache.getWeatherError()
+  return res.status(503).json({
+    error: error || 'Weather data not yet available. Please try again shortly.',
+    hint: 'Data is fetched in the background. Refresh the page in a few seconds.',
+  })
 })
 
-// Health check
-app.get('/healthz', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
+/**
+ * Cache status endpoint - debugging/monitoring.
+ * Returns current cache state without triggering refresh.
+ */
+app.get('/api/cache-status', (_req, res) => {
+  const diagnostics = cache.getDiagnostics()
+  res.json(diagnostics)
 })
 
-// Vercel serverless: Use lazy refresh (no background workers needed)
+/**
+ * Health check endpoint.
+ */
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    cacheStatus: cache.hasData() ? 'populated' : 'empty',
+    environment: process.env.VERCEL ? 'vercel' : 'local',
+  })
+})
+
+// =============================================================================
+// Server Startup
+// =============================================================================
+
+// Vercel serverless: ensureInitialData() handles cold start data fetching
 // Local development: Start background workers for better DX
 if (!process.env.VERCEL) {
   // Start background workers when server starts (local dev only)
   startBackgroundWorkers().catch((err) => {
-    console.error('[server] Failed to start background workers', err)
+    logImportant('Failed to start background workers', err)
   })
 
   // Graceful shutdown
   process.on('SIGTERM', () => {
-    console.log('[server] SIGTERM received, shutting down')
+    logImportant('SIGTERM received, shutting down')
     stopBackgroundWorkers()
     process.exit(0)
   })
 
   process.on('SIGINT', () => {
-    console.log('[server] SIGINT received, shutting down')
+    logImportant('SIGINT received, shutting down')
     stopBackgroundWorkers()
     process.exit(0)
   })
@@ -265,10 +271,10 @@ if (!process.env.VERCEL) {
   // Start server for local development
   const port = process.env.PORT || 3000
   app.listen(port, () => {
-    console.log(`[server] Listening on http://localhost:${port}`)
+    logImportant(`Listening on http://localhost:${port}`)
   })
 } else {
-  console.log('[server] Running in Vercel serverless mode (lazy refresh)')
+  logImportant('Running in Vercel serverless mode')
 }
 
 export default app

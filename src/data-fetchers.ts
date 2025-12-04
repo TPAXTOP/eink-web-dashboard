@@ -1,17 +1,43 @@
 /**
- * Background data fetching service.
- * Fetches weather and FX data at configurable intervals.
+ * Data fetching service with stale-while-revalidate pattern.
+ *
+ * ARCHITECTURE (Vercel Serverless Compatible):
+ * - Non-blocking: Request handlers never wait for external API calls (when cache has data)
+ * - Blocking initial fetch: On cold start with empty cache, wait for first fetch
+ * - Stale-while-revalidate: Serve cached data immediately, refresh in background
+ * - Rate limiting: Enforce minimum intervals between fetch attempts
+ * - Graceful degradation: Keep showing stale data if refresh fails
+ *
+ * KEY FUNCTIONS:
+ * - ensureInitialData(): BLOCKING - use on cold start when cache is empty
+ * - triggerBackgroundRefresh(): Non-blocking - use when cache has data
+ * - fetchWeather() / fetchFx(): Actual API calls, used internally
+ * - startBackgroundWorkers(): Local dev only, uses setInterval
  */
 
-import { dataFetchConfig, weatherConfig, fxConfig } from './config.js'
+import { dataFetchConfig, weatherConfig, fxConfig, loggingConfig } from './config.js'
 import * as cache from './cache.js'
+import { formatKyivDateTimeForLog } from './time-utils.js'
 
-const logWeather = (...args: unknown[]) => console.log('[weather-worker]', ...args)
-const logFx = (...args: unknown[]) => console.log('[fx-worker]', ...args)
+// =============================================================================
+// Diagnostic Logging
+// =============================================================================
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Weather fetcher
-// ─────────────────────────────────────────────────────────────────────────────
+const getTimestamp = () => formatKyivDateTimeForLog()
+
+const log = (tag: string, ...args: unknown[]) => {
+  if (loggingConfig.verbose) {
+    console.log(`[${tag}]`, getTimestamp(), ...args)
+  }
+}
+
+const logImportant = (tag: string, ...args: unknown[]) => {
+  console.log(`[${tag}]`, getTimestamp(), ...args)
+}
+
+// =============================================================================
+// Weather Fetcher
+// =============================================================================
 
 const WEATHER_API_URL = 'https://api.open-meteo.com/v1/forecast'
 
@@ -24,8 +50,15 @@ const buildWeatherUrl = (): string => {
   return url.toString()
 }
 
-export const fetchWeather = async (): Promise<void> => {
-  logWeather('Fetching weather data')
+/**
+ * Fetch weather data from external API.
+ * Records attempt timestamp regardless of success/failure.
+ */
+export const fetchWeather = async (): Promise<boolean> => {
+  logImportant('weather', '→ Fetching weather data from API')
+
+  // Record attempt BEFORE making the request (rate limiting)
+  cache.recordWeatherFetchAttempt()
 
   try {
     const controller = new AbortController()
@@ -54,20 +87,23 @@ export const fetchWeather = async (): Promise<void> => {
       fetchedAt: new Date().toISOString(),
     })
 
-    logWeather('Weather data cached', {
+    logImportant('weather', '✓ Weather data fetched and cached', {
       temp: current.temperature_2m,
       code: current.weather_code,
     })
+    return true
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logWeather('Failed to fetch weather', message)
+    logImportant('weather', '✗ Failed to fetch weather:', message)
     cache.setWeatherError(message)
+    // Note: Existing cached data is preserved for graceful degradation
+    return false
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FX fetcher
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// FX Fetcher
+// =============================================================================
 
 const FX_BASE_URL = 'https://api.exchangerate.host/timeframe'
 
@@ -158,15 +194,23 @@ const parseFxPayload = (payload: unknown): FxPoint[] => {
   throw new Error('FX payload missing rates or quotes data')
 }
 
-export const fetchFx = async (): Promise<void> => {
+/**
+ * Fetch FX data from external API.
+ * Records attempt timestamp regardless of success/failure.
+ */
+export const fetchFx = async (): Promise<boolean> => {
   const apiKey = process.env.EXCHANGERATE_API_KEY
+
+  // Record attempt before any early exits to enforce retry interval
+  cache.recordFxFetchAttempt()
+
   if (!apiKey) {
-    logFx('Missing EXCHANGERATE_API_KEY env')
-    cache.setFxError('Exchange rate API key missing')
-    return
+    logImportant('fx', '⚠ Missing EXCHANGERATE_API_KEY env - skipping FX fetch')
+    cache.setFxError('Exchange rate API key not configured')
+    return false
   }
 
-  logFx('Fetching FX data')
+  logImportant('fx', '→ Fetching FX data from API')
 
   try {
     const end = new Date()
@@ -174,7 +218,7 @@ export const fetchFx = async (): Promise<void> => {
     start.setDate(end.getDate() - fxConfig.historyDays)
 
     const requestUrl = buildFxUrl(toIsoDate(start), toIsoDate(end), apiKey)
-    logFx('Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
+    log('fx', 'Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 8000)
@@ -184,7 +228,7 @@ export const fetchFx = async (): Promise<void> => {
 
     if (!response.ok) {
       const text = await response.text()
-      logFx('Upstream error response', { status: response.status, body: text })
+      log('fx', 'Upstream error response', { status: response.status, body: text.slice(0, 200) })
       throw new Error(`FX upstream responded with ${response.status}`)
     }
 
@@ -202,77 +246,188 @@ export const fetchFx = async (): Promise<void> => {
       fetchedAt: new Date().toISOString(),
     })
 
-    logFx('FX data cached', { points: points.length, latest })
+    logImportant('fx', '✓ FX data fetched and cached', { points: points.length, latest: latest?.value })
+    return true
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logFx('Failed to fetch FX', message)
+    logImportant('fx', '✗ Failed to fetch FX:', message)
     cache.setFxError(message)
+    // Note: Existing cached data is preserved for graceful degradation
+    return false
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Lazy refresh (Vercel-compatible)
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Non-Blocking Background Refresh (Vercel-Compatible)
+// =============================================================================
 
-// Track in-flight fetches to avoid duplicate requests
-let weatherFetchPromise: Promise<void> | null = null
-let fxFetchPromise: Promise<void> | null = null
+// Track in-flight fetches to avoid duplicate concurrent requests
+let weatherFetchPromise: Promise<boolean> | null = null
+let fxFetchPromise: Promise<boolean> | null = null
 
 /**
- * Ensure weather data is fresh. If stale, refreshes in the background.
- * Returns immediately with current cache (even if stale) to avoid blocking.
+ * Check if weather needs refresh and trigger if necessary.
+ * NON-BLOCKING: Returns immediately, fetch runs in background.
+ *
+ * Refresh conditions (ALL must be true):
+ * 1. Data is stale (age > interval)
+ * 2. Enough time has passed since last attempt (rate limiting)
+ * 3. No fetch is already in progress
  */
-export const ensureWeatherFresh = async (): Promise<void> => {
+const maybeRefreshWeather = (): void => {
+  // Skip if data is fresh
   if (!cache.isWeatherStale(dataFetchConfig.weatherIntervalMs)) {
-    return // Data is fresh
+    log('weather', 'Data is fresh, skipping refresh')
+    return
   }
 
-  // Avoid duplicate concurrent fetches
+  // Skip if we recently attempted a fetch (rate limiting)
+  if (!cache.canAttemptWeatherFetch(dataFetchConfig.retryIntervalMs)) {
+    log('weather', 'Skipping refresh - too soon since last attempt')
+    return
+  }
+
+  // Skip if fetch already in progress
   if (weatherFetchPromise) {
-    return weatherFetchPromise
+    log('weather', 'Skipping refresh - fetch already in progress')
+    return
   }
 
-  console.log('[lazy-refresh] Weather data is stale, refreshing')
+  logImportant('weather', 'Data is stale, triggering background refresh')
   weatherFetchPromise = fetchWeather().finally(() => {
     weatherFetchPromise = null
   })
 
-  return weatherFetchPromise
+  // Fire and forget - don't await
 }
 
 /**
- * Ensure FX data is fresh. If stale, refreshes in the background.
- * Returns immediately with current cache (even if stale) to avoid blocking.
+ * Check if FX needs refresh and trigger if necessary.
+ * NON-BLOCKING: Returns immediately, fetch runs in background.
+ *
+ * Refresh conditions (ALL must be true):
+ * 1. Data is stale (age > interval)
+ * 2. Enough time has passed since last attempt (rate limiting)
+ * 3. No fetch is already in progress
  */
-export const ensureFxFresh = async (): Promise<void> => {
+const maybeRefreshFx = (): void => {
+  // Skip if data is fresh
   if (!cache.isFxStale(dataFetchConfig.fxIntervalMs)) {
-    return // Data is fresh
+    log('fx', 'Data is fresh, skipping refresh')
+    return
   }
 
-  // Avoid duplicate concurrent fetches
+  // Skip if we recently attempted a fetch (rate limiting)
+  if (!cache.canAttemptFxFetch(dataFetchConfig.retryIntervalMs)) {
+    log('fx', 'Skipping refresh - too soon since last attempt')
+    return
+  }
+
+  // Skip if fetch already in progress
   if (fxFetchPromise) {
-    return fxFetchPromise
+    log('fx', 'Skipping refresh - fetch already in progress')
+    return
   }
 
-  console.log('[lazy-refresh] FX data is stale, refreshing')
+  logImportant('fx', 'Data is stale, triggering background refresh')
   fxFetchPromise = fetchFx().finally(() => {
     fxFetchPromise = null
   })
 
-  return fxFetchPromise
+  // Fire and forget - don't await
 }
 
 /**
- * Ensure all data sources are fresh before rendering.
- * This is the main entry point for lazy refresh on each request.
+ * Trigger background refresh for all stale data sources.
+ * NON-BLOCKING: Returns immediately, request handler continues with cached data.
+ *
+ * This is the main entry point called from request handlers.
+ * It checks each data source and triggers refresh if needed.
+ *
+ * IMPORTANT: This function does NOT await any fetches.
+ * The request handler should immediately render using current cached data.
  */
-export const ensureFreshData = async (): Promise<void> => {
-  await Promise.all([ensureWeatherFresh(), ensureFxFresh()])
+export const triggerBackgroundRefresh = (): void => {
+  log('refresh', 'Checking if background refresh needed')
+  maybeRefreshWeather()
+  maybeRefreshFx()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Background workers (for local development only)
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Blocking Initial Fetch (For Cold Start with Empty Cache)
+// =============================================================================
+
+/**
+ * Ensure initial data is available before rendering.
+ * BLOCKING: Waits for fetches to complete if cache is empty.
+ *
+ * This should be called on cold start when cache.isEmpty() returns true.
+ * It ensures the first request sees real data instead of "Loading...".
+ *
+ * After initial data is loaded, subsequent requests use triggerBackgroundRefresh().
+ */
+export const ensureInitialData = async (): Promise<void> => {
+  // Check if we have any data at all
+  if (!cache.isEmpty()) {
+    log('init', 'Cache has data, skipping blocking fetch')
+    // Still trigger background refresh for stale data
+    triggerBackgroundRefresh()
+    return
+  }
+
+  logImportant('init', '⏳ Cache is empty - performing blocking initial fetch')
+  logImportant('init', 'This may take a few seconds...')
+
+  // Fetch both weather and FX in parallel, wait for completion
+  const results = await Promise.all([
+    fetchWeather().catch((err) => {
+      logImportant('init', 'Weather fetch error:', err)
+      return false
+    }),
+    fetchFx().catch((err) => {
+      logImportant('init', 'FX fetch error:', err)
+      return false
+    }),
+  ])
+
+  const [weatherSuccess, fxSuccess] = results
+  logImportant('init', `✓ Initial fetch complete: weather=${weatherSuccess}, fx=${fxSuccess}`)
+}
+
+// =============================================================================
+// Legacy Functions (Deprecated, kept for backwards compatibility)
+// =============================================================================
+
+/**
+ * @deprecated Use ensureInitialData() for cold start, triggerBackgroundRefresh() otherwise.
+ */
+export const ensureFreshData = async (): Promise<void> => {
+  await ensureInitialData()
+}
+
+/**
+ * @deprecated Use triggerBackgroundRefresh() instead.
+ */
+export const ensureWeatherFresh = async (): Promise<void> => {
+  maybeRefreshWeather()
+  if (weatherFetchPromise) {
+    await weatherFetchPromise
+  }
+}
+
+/**
+ * @deprecated Use triggerBackgroundRefresh() instead.
+ */
+export const ensureFxFresh = async (): Promise<void> => {
+  maybeRefreshFx()
+  if (fxFetchPromise) {
+    await fxFetchPromise
+  }
+}
+
+// =============================================================================
+// Background Workers (Local Development Only)
+// =============================================================================
 
 let weatherIntervalId: ReturnType<typeof setInterval> | null = null
 let fxIntervalId: ReturnType<typeof setInterval> | null = null
@@ -280,24 +435,26 @@ let fxIntervalId: ReturnType<typeof setInterval> | null = null
 /**
  * Start all background data fetching workers.
  * Fetches data immediately, then continues at configured intervals.
- * NOTE: Only used in local development; Vercel uses lazy refresh.
+ *
+ * NOTE: Only used in local development.
+ * On Vercel, use ensureInitialData() + triggerBackgroundRefresh() instead.
  */
 export const startBackgroundWorkers = async (): Promise<void> => {
-  console.log('[workers] Starting background data fetchers')
+  logImportant('workers', 'Starting background data fetchers (local dev mode)')
 
   // Fetch immediately on startup
   await Promise.all([fetchWeather(), fetchFx()])
 
   // Schedule recurring fetches
   weatherIntervalId = setInterval(() => {
-    fetchWeather().catch((err) => console.error('[weather-worker] Unhandled error', err))
+    fetchWeather().catch((err) => logImportant('weather', 'Unhandled error in worker:', err))
   }, dataFetchConfig.weatherIntervalMs)
 
   fxIntervalId = setInterval(() => {
-    fetchFx().catch((err) => console.error('[fx-worker] Unhandled error', err))
+    fetchFx().catch((err) => logImportant('fx', 'Unhandled error in worker:', err))
   }, dataFetchConfig.fxIntervalMs)
 
-  console.log('[workers] Background workers running', {
+  logImportant('workers', 'Background workers running', {
     weatherInterval: `${dataFetchConfig.weatherIntervalMs / 1000}s`,
     fxInterval: `${dataFetchConfig.fxIntervalMs / 1000}s`,
   })
@@ -315,5 +472,5 @@ export const stopBackgroundWorkers = (): void => {
     clearInterval(fxIntervalId)
     fxIntervalId = null
   }
-  console.log('[workers] Background workers stopped')
+  logImportant('workers', 'Background workers stopped')
 }

@@ -4,6 +4,7 @@
  */
 
 import * as cache from './cache.js'
+import { formatKyivDateTimeForDisplay, formatKyivTime } from './time-utils.js'
 
 const WEATHER_CODES: Record<number, string> = {
   0: 'Clear sky',
@@ -45,23 +46,12 @@ const formatRate = (value: number | undefined): string => {
 
 const formatTime = (isoString: string | undefined): string => {
   if (!isoString) return '--'
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(isoString))
-  } catch {
-    return '--'
-  }
+  return formatKyivTime(isoString)
 }
 
 const formatDateTime = (isoString: string | undefined): string => {
   if (!isoString) return '--'
-  try {
-    return new Date(isoString).toLocaleString('en-GB', { hour12: false })
-  } catch {
-    return '--'
-  }
+  return formatKyivDateTimeForDisplay(isoString)
 }
 
 /**
@@ -155,7 +145,7 @@ export const renderDashboard = (): string => {
   const weatherHumidity = weather ? `${weather.humidity} %` : '-- %'
   const weatherWind = weather ? `${weather.windSpeed} m/s` : '-- m/s'
   const weatherStatus = weather
-    ? `As of ${formatTime(weather.time)} Kyiv time`
+    ? `As of ${formatTime(weather.time)}`
     : weatherError
       ? 'Unavailable'
       : 'Loading...'
