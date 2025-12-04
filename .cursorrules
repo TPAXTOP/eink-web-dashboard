@@ -43,17 +43,20 @@ This project is a **static webpage designed for a monochrome e-paper display** w
    - Test with grayscale conversion
 
 ### Code Structure
-- Keep Express routes simple and focused on data aggregation
+- Keep Express routes simple and focused on rendering
 - Separate data fetching logic from rendering logic
 - Use TypeScript for type safety
 - Implement proper error handling and logging
-- Consider rate limiting and caching strategies
+- **NEVER call external APIs directly in route handlers**
 
 ### Content Guidelines
 - Display only essential, actionable information
 - Update timestamps should be visible
 - Show clear indicators for stale or missing data
 - Prioritize information density while maintaining readability
+
+## Timezone Handling
+- Display and log every timestamp or date/time message in Kyiv time (`Europe/Kyiv`) so dashboard readers always see local time.
 
 ## Common Tasks
 - When adding new data sources: Implement caching and error handling
@@ -63,9 +66,9 @@ This project is a **static webpage designed for a monochrome e-paper display** w
 
 ---
 
-## Architectural Principles (E-Paper App / Vercel Adaptation)
+## Architectural Principles (Vercel Serverless Optimized)
 
-This section documents the core architectural patterns established during the server-side rendering and Vercel adaptation refactoring. These principles ensure the app remains compatible with both e-paper display requirements and Vercel's serverless execution model.
+This section documents the core architectural patterns for the server-side rendering and Vercel adaptation. These principles ensure the app remains compatible with both e-paper display requirements and Vercel's serverless execution model.
 
 ### Rendering Model
 
@@ -73,44 +76,86 @@ This section documents the core architectural patterns established during the se
 2. **No Client-Side Async Loading**: Browser-side `fetch()`, `XHR`, `WebSocket`, or any asynchronous data loading is forbidden. The page must render instantly without JavaScript execution.
 3. **SVG for Charts and Graphics**: Use inline SVG for charts and visualizations. Do not rely on client-side charting libraries (e.g., Chart.js). SVG renders correctly on e-paper without JavaScript.
 
-### Caching Strategy
+### Data Fetching Architecture (Critical)
 
-1. **In-Memory Cache with Timestamps**: All external data must be stored in the server-side cache (`src/cache.ts`) with a `fetchedAt` timestamp.
-2. **Staleness Detection**: Use `isWeatherStale()` and `isFxStale()` functions to check if cached data has exceeded its expiration window.
-3. **Configurable Expiration Windows**: Define refresh intervals in `src/config.ts`. These values serve as cache expiration thresholds, not as actual timer intervals on Vercel.
-4. **Graceful Degradation**: If data fetch fails, preserve the last successful cache entry and set an error flag. Always render valid HTML.
+1. **Two-Phase Fetch Strategy**:
+   - **Cold Start (empty cache)**: BLOCKING fetch - wait for data before rendering
+   - **Warm Requests (cache has data)**: NON-BLOCKING background refresh
+
+2. **Single Data Fetching Module**: All external API calls must go through `src/data-fetchers.ts`. Direct `fetch()` calls to external APIs in route handlers are **strictly prohibited**.
+
+3. **Centralized Cache Module**: All cache reads/writes must go through `src/cache.ts`. Do not create separate caching logic elsewhere.
+
+4. **Request Handler Pattern**:
+   ```typescript
+   // CORRECT: Use ensureInitialData() + triggerBackgroundRefresh()
+   app.get('/', async (_req, res) => {
+     await ensureInitialData()      // Blocking only on cold start
+     triggerBackgroundRefresh()      // Non-blocking for stale data
+     const html = renderDashboard()  // Render with cached data
+     res.type('html').send(html)
+   })
+   ```
+
+### Caching Strategy (Vercel + vercel dev Compatible)
+
+1. **Hybrid Cache (Memory + File)**:
+   - Primary: In-memory for fast access during warm invocations
+   - Secondary: File-based under `os.tmpdir()` for cold start recovery
+   - **Must use `os.tmpdir()`** for cross-platform support (Windows + Linux)
+
+2. **Dual Timestamp Tracking**:
+   - `fetchedAt`: When data was successfully retrieved (staleness check)
+   - `lastFetchAttemptAt`: When last fetch was attempted (rate limiting)
+
+3. **Strict Interval Enforcement**: 
+   - Do not retry API calls until `retryIntervalMs` has passed since last attempt
+   - This prevents API hammering even when fetches fail
+   - Configurable in `src/config.ts`
+
+4. **Graceful Degradation**: 
+   - If fetch fails, preserve last successful cache entry
+   - Always render valid HTML with available (possibly stale) data
+   - Show appropriate status indicators ("Unavailable", "As of [time]")
 
 ### Vercel Serverless Compatibility
 
-1. **No Long-Running Processes**: Vercel functions are stateless and short-lived. Do not use `setInterval`, `setTimeout` loops, or persistent background jobs in production.
-2. **Lazy Refresh Pattern**: On each request, check if cached data is stale. If so, fetch fresh data before rendering. This replaces interval-based background workers.
-3. **Background Workers for Local Dev Only**: The `startBackgroundWorkers()` function should only execute when `process.env.VERCEL` is falsy. This provides a better local development experience.
-4. **Concurrent Fetch Protection**: Track in-flight fetch promises to prevent duplicate API calls when multiple requests arrive simultaneously.
-5. **Explicit Type Annotations**: When exporting the Express app, use `const app: Application = express()` to avoid TypeScript portability errors (TS2742).
+1. **No Long-Running Processes**: Do not use `setInterval`, `setTimeout` loops, or persistent background jobs in production Vercel code.
 
-### Data Fetching
+2. **Background Workers for Local Dev Only**: The `startBackgroundWorkers()` function executes only when `process.env.VERCEL` is falsy.
 
-1. **Centralized Fetcher Module**: All external API calls must go through `src/data-fetchers.ts`. Do not scatter fetch logic across route handlers.
-2. **Timeout Handling**: Use `AbortController` with timeouts (8 seconds recommended) to prevent hanging requests.
-3. **Error Isolation**: Catch and log errors in fetchers. Store error messages in cache for display. Never let a failed fetch crash the server.
-4. **Independent Refresh Intervals**: Each data source has its own expiration window. Weather and FX rates refresh independently.
+3. **Concurrent Fetch Protection**: Track in-flight fetch promises to prevent duplicate API calls when multiple requests arrive simultaneously.
+
+4. **Cold Start Recovery**: On cold start, cache is automatically initialized from temp files before serving the first request.
+
+5. **Cross-Platform Temp Directory**: Always use `os.tmpdir()` instead of hardcoded `/tmp` for Windows compatibility with `vercel dev`.
+
+### Logging Strategy
+
+1. **Diagnostic Logging**: Enabled via `loggingConfig.verbose` (false in production)
+2. **Important Events**: Always logged regardless of environment:
+   - External API calls (start and result)
+   - Cache hits/misses on cold start
+   - Errors and warnings
+3. **Log Format**: Use `[tag]` prefix for easy filtering (e.g., `[weather]`, `[fx]`, `[cache]`)
 
 ### Module Structure
 
 | Module | Responsibility |
 |--------|----------------|
-| `src/config.ts` | Refresh intervals, API endpoints, and configuration constants |
-| `src/cache.ts` | In-memory data storage, getters/setters, staleness checks |
-| `src/data-fetchers.ts` | External API calls, lazy refresh logic, background workers |
-| `src/template.ts` | HTML generation from cached data |
-| `src/index.ts` | Express routes, middleware, server startup |
+| `src/config.ts` | Refresh intervals, API config, cache paths, logging config |
+| `src/cache.ts` | Hybrid memory+file storage, staleness checks, fetch attempt tracking |
+| `src/data-fetchers.ts` | External API calls, blocking/non-blocking refresh, background workers |
+| `src/template.ts` | HTML generation from cached data (main dashboard) |
+| `src/panel-template.ts` | HTML generation for e-paper panel (800x480) |
+| `src/index.ts` | Express routes, middleware, server startup (NO direct API calls) |
 | `api/index.ts` | Vercel serverless entry point (re-exports Express app) |
 
 ### Development Parity
 
-1. **Local and Production Must Behave Identically**: The rendered output should be the same whether running `pnpm dev` or deployed to Vercel.
+1. **Local and Production Must Behave Identically**: The rendered output should match whether running `pnpm dev`, `vercel dev`, or deployed to Vercel.
 2. **Use `vercel dev` for Testing**: When testing Vercel-specific behavior locally, use `vercel dev` to simulate the serverless environment.
-3. **Environment Detection**: Use `process.env.VERCEL` to conditionally enable local-only features (background workers, dev server listening).
+3. **Environment Detection**: Use `process.env.VERCEL` to conditionally enable local-only features.
 
 ### Prohibited Patterns
 
@@ -119,4 +164,60 @@ This section documents the core architectural patterns established during the se
 - ❌ `setInterval` or `setTimeout` in Vercel production code
 - ❌ External state stores (Redis, databases) unless explicitly required
 - ❌ Heavy frameworks (React, Vue, Next.js) — keep it lightweight Express + templates
-- ❌ Modifying templates or markup without preserving existing structure and comments
+- ❌ Modifying templates or markup without preserving existing structure
+- ❌ **Direct external API `fetch()` in route handlers**
+- ❌ **Hardcoded `/tmp` path** (use `os.tmpdir()` for cross-platform)
+- ❌ **Rendering before ensuring data exists** (use `ensureInitialData()`)
+- ❌ **Ignoring rate limiting** (always check `canAttempt*Fetch()`)
+
+### Adding New Data Sources
+
+When adding a new external data source, follow this checklist:
+
+1. **Config** (`src/config.ts`):
+   - Add refresh interval (e.g., `newSourceIntervalMs`)
+   - Add cache file name (e.g., `newSourceFile`)
+   - Add any API-specific configuration
+
+2. **Cache** (`src/cache.ts`):
+   - Define data type (e.g., `NewSourceData`)
+   - Add cache variable and getter/setter functions
+   - Add `isNewSourceStale()` staleness check
+   - Add `canAttemptNewSourceFetch()` rate limiting check
+   - Add `recordNewSourceFetchAttempt()` for tracking attempts
+   - Update `initializeFromFiles()` to load from file on cold start
+   - Update `isEmpty()` if this source is required for rendering
+
+3. **Data Fetcher** (`src/data-fetchers.ts`):
+   - Add `fetchNewSource()` function with:
+     - Record attempt timestamp BEFORE fetch
+     - AbortController with 8-second timeout
+     - Error handling that preserves existing cache
+   - Add `maybeRefreshNewSource()` non-blocking trigger
+   - Update `triggerBackgroundRefresh()` to include new source
+   - Update `ensureInitialData()` to include new source
+   - Update `startBackgroundWorkers()` for local dev
+
+4. **Template** (`src/template.ts` or `src/panel-template.ts`):
+   - Add rendering logic for new data
+   - Include fallback/placeholder for missing data
+   - Show appropriate status indicators
+
+5. **Routes** (`src/index.ts`):
+   - Optionally add API endpoint that returns cached data only
+   - Do NOT add direct API fetch logic in routes
+
+### Testing Checklist
+
+Before deploying changes to data fetching:
+
+- [ ] `vercel dev` shows data on first load (blocking initial fetch works)
+- [ ] Subsequent refreshes are fast (non-blocking refresh works)
+- [ ] Cache persists between `vercel dev` restarts (file persistence works)
+- [ ] API calls only happen when interval has passed (check logs)
+- [ ] Failed API calls don't trigger immediate retry (rate limiting works)
+- [ ] Stale data is displayed (not "Loading...") when refresh fails
+- [ ] No duplicate fetch requests when multiple users hit the page
+- [ ] Windows and Linux compatibility (uses `os.tmpdir()`)
+- [ ] All external API calls go through `data-fetchers.ts`
+- [ ] `/api/cache-status` endpoint shows correct diagnostics
