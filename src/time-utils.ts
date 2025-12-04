@@ -55,6 +55,28 @@ export const formatKyivTime = (value: string | number | Date): string => {
   return stripCommas(timeFormatter.format(date))
 }
 
+/**
+ * Format a time string that is already in Kyiv timezone (e.g., from Open-Meteo API).
+ * This extracts the time portion without timezone conversion to avoid double-conversion issues.
+ * 
+ * Open-Meteo API returns times like "2025-12-04T14:30" which are already in the requested timezone.
+ * We extract the time portion directly to display it without adding/subtracting timezone offsets.
+ */
+export const formatKyivTimeFromLocalString = (isoString: string | undefined): string => {
+  if (!isoString) {
+    return '--'
+  }
+  
+  // Extract time from ISO string (e.g., "2025-12-04T14:30:00" → "14:30")
+  const match = isoString.match(/T(\d{2}):(\d{2})/)
+  if (match) {
+    return `${match[1]}:${match[2]}`
+  }
+  
+  // Fallback to regular parsing if format is unexpected
+  return formatKyivTime(isoString)
+}
+
 export const formatKyivDateTimeForDisplay = (value: string | number | Date): string => {
   const date = parseDate(value)
   if (!date) {

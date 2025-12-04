@@ -4,7 +4,7 @@
  */
 
 import * as cache from './cache.js'
-import { formatKyivDateTimeForDisplay, formatKyivTime } from './time-utils.js'
+import { formatKyivDateTimeForDisplay, formatKyivTime, formatKyivTimeFromLocalString } from './time-utils.js'
 
 const WEATHER_CODES: Record<number, string> = {
   0: 'Clear sky',
@@ -46,7 +46,7 @@ const formatRate = (value: number | undefined): string => {
 
 const formatTime = (isoString: string | undefined): string => {
   if (!isoString) return '--'
-  return formatKyivTime(isoString)
+  return formatKyivTimeFromLocalString(isoString)
 }
 
 const formatDateTime = (isoString: string | undefined): string => {
