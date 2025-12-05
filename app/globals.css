@@ -45,7 +45,8 @@ body {
   font-weight: 700;
 }
 
-#updatedAt {
+#updatedAt,
+.updated-at {
   font-weight: 600;
   margin: 0;
   font-size: 0.78rem;
@@ -167,3 +168,4 @@ svg {
     flex-direction: column;
   }
 }
+

@@ -28,6 +28,19 @@ const logFormatter = createFormatter({
   hour12: false,
 })
 
+const shortDateFormatter = createFormatter({
+  day: 'numeric',
+  month: 'short',
+})
+
+const shortDateTimeFormatter = createFormatter({
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
 const parseDate = (value?: string | number | Date): Date | null => {
   if (value === undefined || value === null) {
     return null
@@ -58,7 +71,7 @@ export const formatKyivTime = (value: string | number | Date): string => {
 /**
  * Format a time string that is already in Kyiv timezone (e.g., from Open-Meteo API).
  * This extracts the time portion without timezone conversion to avoid double-conversion issues.
- * 
+ *
  * Open-Meteo API returns times like "2025-12-04T14:30" which are already in the requested timezone.
  * We extract the time portion directly to display it without adding/subtracting timezone offsets.
  */
@@ -66,13 +79,13 @@ export const formatKyivTimeFromLocalString = (isoString: string | undefined): st
   if (!isoString) {
     return '--'
   }
-  
+
   // Extract time from ISO string (e.g., "2025-12-04T14:30:00" → "14:30")
   const match = isoString.match(/T(\d{2}):(\d{2})/)
   if (match) {
     return `${match[1]}:${match[2]}`
   }
-  
+
   // Fallback to regular parsing if format is unexpected
   return formatKyivTime(isoString)
 }
@@ -89,3 +102,38 @@ export const formatKyivDateTimeForLog = (value?: string | number | Date): string
   const date = ensureDateOrNow(value)
   return stripCommas(logFormatter.format(date))
 }
+
+/**
+ * Format a date string as short date (e.g., "5 Dec").
+ * For date-only strings like "2025-12-05", parses as local date to avoid timezone shifts.
+ */
+export const formatShortDate = (value: string | undefined): string => {
+  if (!value) return '--'
+  
+  // For date-only strings (YYYY-MM-DD), parse components directly
+  // to avoid timezone interpretation issues
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch
+    // Create date at noon UTC to avoid any timezone edge cases
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0))
+    return stripCommas(shortDateFormatter.format(date))
+  }
+  
+  const date = parseDate(value)
+  if (!date) return '--'
+  return stripCommas(shortDateFormatter.format(date))
+}
+
+/**
+ * Format an ISO timestamp as short date and time (e.g., "5 Dec 15:30").
+ * Properly converts UTC timestamps to Kyiv timezone.
+ */
+export const formatShortDateTime = (value: string | undefined): string => {
+  if (!value) return '--'
+  
+  const date = parseDate(value)
+  if (!date) return '--'
+  return stripCommas(shortDateTimeFormatter.format(date))
+}
+
