@@ -15,7 +15,11 @@ import { describeWeather } from '@/lib/weather-codes'
 import { formatRate, formatTime, formatDateTime, formatDateTimeShort } from '@/lib/format-utils'
 import { FxChart } from './components/FxChart'
 
-// Revalidate this page every 30 minutes (matches weather interval)
+// Force dynamic rendering to ensure fresh data on each request
+// This prevents build-time failures from being cached
+export const dynamic = 'force-dynamic'
+
+// Revalidate data every 30 minutes (matches weather interval)
 export const revalidate = 1800
 
 export default async function DashboardPage() {

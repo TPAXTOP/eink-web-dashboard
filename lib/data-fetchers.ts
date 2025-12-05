@@ -2,7 +2,7 @@
  * Data fetching service using Next.js built-in caching.
  *
  * ARCHITECTURE (Next.js App Router):
- * - Uses unstable_cache to cache the entire function result (including fetchedAt timestamp)
+ * - Uses fetch() with next.revalidate for HTTP-level caching
  * - Next.js handles stale-while-revalidate automatically
  * - No manual file caching needed - Next.js Data Cache handles persistence
  * - Server components call these functions directly
@@ -10,15 +10,14 @@
  * CACHING BEHAVIOR:
  * - Fresh data: Served from cache immediately
  * - Stale data: Served from cache while revalidating in background
- * - On error: Returns null, component should handle gracefully
+ * - On error: Returns null (NOT cached - errors bypass cache)
  *
- * NOTE: We use unstable_cache instead of fetch's revalidate option because
- * we need to cache the processed result including the fetchedAt timestamp.
- * With fetch's revalidate, only the HTTP response is cached, but our
- * wrapper function (which sets fetchedAt) runs on every request.
+ * NOTE: We use fetch()'s next.revalidate option instead of unstable_cache
+ * because unstable_cache caches ALL return values including null/errors,
+ * which causes failed builds to cache failures indefinitely. With fetch's
+ * revalidate, only successful HTTP responses are cached.
  */
 
-import { unstable_cache } from 'next/cache'
 import { dataFetchConfig, weatherConfig, fxConfig, loggingConfig } from './config'
 import { formatKyivDateTimeForLog } from './time-utils'
 import type { WeatherData, FxData, FxPoint } from './types'
@@ -55,16 +54,17 @@ const buildWeatherUrl = (): string => {
 }
 
 /**
- * Internal function to fetch weather from API.
- * This is wrapped with unstable_cache to cache the entire result including fetchedAt.
+ * Fetch weather data with caching.
+ * Uses fetch()'s built-in caching with revalidate option.
+ * Only successful responses are cached; errors are not cached.
  */
-const fetchWeatherFromApi = async (): Promise<WeatherData | null> => {
+export const fetchWeather = async (): Promise<WeatherData | null> => {
   logImportant('weather', '→ Fetching weather data from external API')
 
   try {
-    // Use cache: 'no-store' since caching is handled by unstable_cache wrapper
+    // Use next.revalidate for HTTP-level caching (only caches successful responses)
     const response = await fetch(buildWeatherUrl(), {
-      cache: 'no-store',
+      next: { revalidate: dataFetchConfig.weatherRevalidateSeconds },
     })
 
     if (!response.ok) {
@@ -99,16 +99,6 @@ const fetchWeatherFromApi = async (): Promise<WeatherData | null> => {
     return null
   }
 }
-
-/**
- * Fetch weather data with caching.
- * Uses unstable_cache to cache the entire result including fetchedAt timestamp.
- */
-export const fetchWeather = unstable_cache(
-  fetchWeatherFromApi,
-  ['weather-data'],
-  { revalidate: dataFetchConfig.weatherRevalidateSeconds }
-)
 
 // =============================================================================
 // FX Fetcher
@@ -202,10 +192,11 @@ const parseFxPayload = (payload: unknown): FxPoint[] => {
 }
 
 /**
- * Internal function to fetch FX from API.
- * This is wrapped with unstable_cache to cache the entire result including fetchedAt.
+ * Fetch FX data with caching.
+ * Uses fetch()'s built-in caching with revalidate option.
+ * Only successful responses are cached; errors are not cached.
  */
-const fetchFxFromApi = async (): Promise<FxData | null> => {
+export const fetchFx = async (): Promise<FxData | null> => {
   const apiKey = process.env.EXCHANGERATE_API_KEY
 
   if (!apiKey) {
@@ -223,9 +214,9 @@ const fetchFxFromApi = async (): Promise<FxData | null> => {
     const requestUrl = buildFxUrl(toIsoDate(start), toIsoDate(end), apiKey)
     log('fx', 'Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
 
-    // Use cache: 'no-store' since caching is handled by unstable_cache wrapper
+    // Use next.revalidate for HTTP-level caching (only caches successful responses)
     const response = await fetch(requestUrl, {
-      cache: 'no-store',
+      next: { revalidate: dataFetchConfig.fxRevalidateSeconds },
     })
 
     if (!response.ok) {
@@ -260,16 +251,6 @@ const fetchFxFromApi = async (): Promise<FxData | null> => {
     return null
   }
 }
-
-/**
- * Fetch FX data with caching.
- * Uses unstable_cache to cache the entire result including fetchedAt timestamp.
- */
-export const fetchFx = unstable_cache(
-  fetchFxFromApi,
-  ['fx-data'],
-  { revalidate: dataFetchConfig.fxRevalidateSeconds }
-)
 
 // =============================================================================
 // Combined Data Fetcher
