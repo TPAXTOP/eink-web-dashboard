@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   const fxMin = fx ? formatRate(fx.min) : '--'
   const fxMax = fx ? formatRate(fx.max) : '--'
   const fxStatus = fx
-    ? `As of ${formatDateTimeShort(fx.fetchedAt)}`
+    ? `As of ${formatDateTimeShort(fx.updatedAt)}`
     : 'Unavailable'
   const fxError = !fx
 

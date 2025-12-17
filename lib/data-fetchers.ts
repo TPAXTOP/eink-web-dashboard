@@ -230,6 +230,13 @@ export const fetchFx = async (): Promise<FxData | null> => {
     const values = points.map((p) => p.value)
     const latest = points[points.length - 1]
 
+    // Extract timestamp from API response (Unix timestamp in seconds)
+    // Convert to ISO string for consistent handling
+    const apiTimestamp = (payload as { timestamp?: number }).timestamp
+    const updatedAt = apiTimestamp
+      ? new Date(apiTimestamp * 1000).toISOString()
+      : new Date().toISOString() // Fallback to current time if timestamp missing
+
     const data: FxData = {
       points,
       latest,
@@ -237,6 +244,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
       max: Math.max(...values),
       source: 'exchangerate.host',
       fetchedAt: new Date().toISOString(),
+      updatedAt,
     }
 
     logImportant('fx', '✓ FX data fetched from external API', {

@@ -23,5 +23,6 @@ export type FxData = {
   max: number
   source: string
   fetchedAt: string
+  updatedAt: string // Timestamp from API response (when rates were actually updated)
 }
 
