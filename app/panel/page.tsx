@@ -5,7 +5,14 @@
  */
 
 import type { Metadata, Viewport } from 'next'
+import { fetchWeather, fetchOutageSchedule, getHourlyOutages } from '@/lib/data-fetchers'
+import { fetchBackupPower } from '@/lib/deye-api'
+import { describeWeather } from '@/lib/weather-codes'
+import { formatKyivDateTimeForDisplay } from '@/lib/time-utils'
 import './panel.css'
+
+// Revalidate every 15 minutes (matches outage schedule refresh)
+export const revalidate = 900
 
 export const metadata: Metadata = {
   title: 'E-Paper Dashboard',
@@ -19,87 +26,55 @@ export const viewport: Viewport = {
 }
 
 // =============================================================================
-// Mock Data (to be replaced with real data integration)
+// Helper Functions
 // =============================================================================
 
-const mockWeather = {
-  location: 'Kyiv, Ukraine',
-  current: { temp_c: 17, condition: 'Partly cloudy', icon: 'partly-cloudy' },
-  hourly: [
-    { time: '11:00', icon: 'partly-cloudy', temp_c: 18 },
-    { time: '12:00', icon: 'partly-cloudy', temp_c: 19 },
-    { time: '13:00', icon: 'cloudy', temp_c: 20 },
-    { time: '14:00', icon: 'rain', temp_c: 20 },
-    { time: '15:00', icon: 'partly-cloudy', temp_c: 21 },
-    { time: '16:00', icon: 'sunny', temp_c: 22 },
-    { time: '17:00', icon: 'sunny', temp_c: 21 },
-    { time: '18:00', icon: 'cloudy', temp_c: 19 },
-  ],
+/**
+ * Convert Open-Meteo weather code to icon name
+ */
+function weatherCodeToIcon(code: number): string {
+  // Clear
+  if (code === 0 || code === 1) return 'sunny'
+  // Partly cloudy
+  if (code === 2) return 'partly-cloudy'
+  // Overcast, fog
+  if (code === 3 || code === 45 || code === 48) return 'cloudy'
+  // Rain, drizzle, showers
+  if (code >= 51 && code <= 67) return 'rain'
+  if (code >= 80 && code <= 82) return 'rain'
+  // Snow
+  if (code >= 71 && code <= 77) return 'cloudy'
+  if (code >= 85 && code <= 86) return 'cloudy'
+  // Thunderstorm
+  if (code >= 95) return 'rain'
+  return 'cloudy'
 }
 
-const mockOutageSchedule = {
-  today: [
-    { h: '00', fraction: 0 },
-    { h: '01', fraction: 0 },
-    { h: '02', fraction: 0 },
-    { h: '03', fraction: 0 },
-    { h: '04', fraction: 0 },
-    { h: '05', fraction: 0 },
-    { h: '06', fraction: 0 },
-    { h: '07', fraction: 0 },
-    { h: '08', fraction: 0 },
-    { h: '09', fraction: 0.5 },
-    { h: '10', fraction: 1 },
-    { h: '11', fraction: 1 },
-    { h: '12', fraction: 0.75 },
-    { h: '13', fraction: 0 },
-    { h: '14', fraction: 0 },
-    { h: '15', fraction: 0 },
-    { h: '16', fraction: 0 },
-    { h: '17', fraction: 0 },
-    { h: '18', fraction: 0 },
-    { h: '19', fraction: 0 },
-    { h: '20', fraction: 0 },
-    { h: '21', fraction: 0 },
-    { h: '22', fraction: 0 },
-    { h: '23', fraction: 0 },
-  ],
-  tomorrow: [
-    { h: '00', fraction: 0 },
-    { h: '01', fraction: 0 },
-    { h: '02', fraction: 0 },
-    { h: '03', fraction: 0 },
-    { h: '04', fraction: 0 },
-    { h: '05', fraction: 0 },
-    { h: '06', fraction: 0 },
-    { h: '07', fraction: 0.25 },
-    { h: '08', fraction: 0.5 },
-    { h: '09', fraction: 1 },
-    { h: '10', fraction: 1 },
-    { h: '11', fraction: 1 },
-    { h: '12', fraction: 0.5 },
-    { h: '13', fraction: 0 },
-    { h: '14', fraction: 0 },
-    { h: '15', fraction: 0 },
-    { h: '16', fraction: 0 },
-    { h: '17', fraction: 0 },
-    { h: '18', fraction: 0 },
-    { h: '19', fraction: 0 },
-    { h: '20', fraction: 0 },
-    { h: '21', fraction: 0 },
-    { h: '22', fraction: 0 },
-    { h: '23', fraction: 0 },
-  ],
+/**
+ * Format ISO time string to display format (HH:MM)
+ */
+function formatHourlyTime(isoTime: string): string {
+  // isoTime format: "2025-12-19T14:00" (already in Kyiv timezone from API)
+  const timePart = isoTime.split('T')[1]
+  return timePart ? timePart.slice(0, 5) : '--:--'
 }
+
+// =============================================================================
+// Mock Data (fallback when Deye API is not configured)
+// =============================================================================
 
 const mockBackup = {
-  battery_now_pct: 90,
-  grid_connected: true,
-  last_update: '2025-12-02 23:30',
-  history_24h: [
+  batteryPercent: 90,
+  gridConnected: true,
+  lastUpdate: new Date().toISOString(),
+  history24h: [
     95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 86, 87, 88, 88, 89, 90, 90, 89, 88, 88, 89, 90,
     90,
-  ],
+  ].map((percent, i) => ({
+    time: new Date(Date.now() - (23 - i) * 60 * 60 * 1000).toISOString(),
+    percent,
+  })),
+  fetchedAt: new Date().toISOString(),
 }
 
 // =============================================================================
@@ -269,7 +244,7 @@ function WeatherIcon({ icon, size = 48 }: { icon: string; size?: number }) {
 // Helper Components
 // =============================================================================
 
-function BatteryGraph({ history }: { history: number[] }) {
+function BatteryGraph({ history }: { history: { time: string; percent: number }[] }) {
   const width = 560
   const height = 100
   const padding = { top: 10, right: 40, bottom: 20, left: 40 }
@@ -290,7 +265,9 @@ function BatteryGraph({ history }: { history: number[] }) {
   const scaleX = (i: number) => padding.left + (i / (history.length - 1)) * graphWidth
   const scaleY = (v: number) => padding.top + graphHeight - (v / 100) * graphHeight
 
-  const points = history.map((v, i) => `${scaleX(i).toFixed(0)},${scaleY(v).toFixed(0)}`).join(' ')
+  const points = history
+    .map((h, i) => `${scaleX(i).toFixed(0)},${scaleY(h.percent).toFixed(0)}`)
+    .join(' ')
 
   return (
     <svg
@@ -433,14 +410,14 @@ function OutageRow({
   schedule,
 }: {
   label: string
-  schedule: { h: string; fraction: number }[]
+  schedule: { hour: string; fraction: number }[]
 }) {
   return (
     <div className="outage-row">
       <span className="outage-label">{label}</span>
       <div className="outage-tiles">
         {schedule.map((s, i) => (
-          <OutageTile key={i} hour={s.h} fraction={s.fraction} />
+          <OutageTile key={i} hour={s.hour} fraction={s.fraction} />
         ))}
       </div>
     </div>
@@ -451,36 +428,58 @@ function OutageRow({
 // Main Panel Page Component
 // =============================================================================
 
-export default function PanelPage() {
-  const weather = mockWeather
-  const outage = mockOutageSchedule
-  const backup = mockBackup
+export default async function PanelPage() {
+  // Fetch real data in parallel
+  const [weatherData, outageSchedule, backupPowerData] = await Promise.all([
+    fetchWeather(),
+    fetchOutageSchedule(),
+    fetchBackupPower(),
+  ])
+
+  // Convert outage schedule to hourly fractions for display
+  const outage = getHourlyOutages(outageSchedule)
+
+  // Use real backup data if available, otherwise fallback to mock
+  const backup = backupPowerData || mockBackup
+
+  // Prepare weather display data
+  const currentIcon = weatherData ? weatherCodeToIcon(weatherData.weatherCode) : 'cloudy'
+  const currentCondition = weatherData ? describeWeather(weatherData.weatherCode) : 'No data'
+  const currentTemp = weatherData ? Math.round(weatherData.temperature) : '--'
+  const hourlyForecast = weatherData?.hourly?.slice(0, 8) || []
 
   return (
     <div className="panel-container">
       {/* Weather Widget - Left Column (200px) */}
       <div className="weather-column">
         <div className="weather-header">
-          <div className="weather-city">{weather.location}</div>
+          <div className="weather-city">Kyiv, Ukraine</div>
         </div>
 
         <div className="weather-current">
           <div className="weather-icon">
-            <WeatherIcon icon={weather.current.icon} size={48} />
+            <WeatherIcon icon={currentIcon} size={48} />
           </div>
-          <div className="weather-temp">{weather.current.temp_c}°</div>
-          <div className="weather-condition">{weather.current.condition}</div>
+          <div className="weather-temp">{currentTemp}°</div>
+          <div className="weather-condition">{currentCondition}</div>
         </div>
 
         <div className="weather-hourly-title">Hourly Forecast</div>
         <div className="weather-hourly">
-          {weather.hourly.map((h, i) => (
-            <div key={i} className="hourly-item">
-              <span className="hourly-time">{h.time}</span>
-              <WeatherIcon icon={h.icon} size={24} />
-              <span className="hourly-temp">{h.temp_c}°</span>
+          {hourlyForecast.length > 0 ? (
+            hourlyForecast.map((h, i) => (
+              <div key={i} className="hourly-item">
+                <span className="hourly-time">{formatHourlyTime(h.time)}</span>
+                <WeatherIcon icon={weatherCodeToIcon(h.weatherCode)} size={24} />
+                <span className="hourly-temp">{Math.round(h.temperature)}°</span>
+              </div>
+            ))
+          ) : (
+            <div className="hourly-item">
+              <span className="hourly-time">--:--</span>
+              <span className="hourly-temp">--°</span>
             </div>
-          ))}
+          )}
         </div>
       </div>
 
@@ -512,18 +511,20 @@ export default function PanelPage() {
           <div className="backup-title">Backup power supply</div>
           <div className="backup-header">
             <div className="backup-battery">
-              <BatteryIcon pct={backup.battery_now_pct} />
-              <span className="battery-pct">{backup.battery_now_pct}%</span>
+              <BatteryIcon pct={backup.batteryPercent} />
+              <span className="battery-pct">{backup.batteryPercent}%</span>
             </div>
             <div className="backup-grid">
-              {backup.grid_connected ? <GridOnIcon /> : <GridOffIcon />}
-              <span>Grid: {backup.grid_connected ? 'Connected' : 'Disconnected'}</span>
+              {backup.gridConnected ? <GridOnIcon /> : <GridOffIcon />}
+              <span>Grid: {backup.gridConnected ? 'Connected' : 'Disconnected'}</span>
             </div>
-            <div className="backup-timestamp">Updated: {backup.last_update}</div>
+            <div className="backup-timestamp">
+              Updated: {formatKyivDateTimeForDisplay(backup.lastUpdate)}
+            </div>
           </div>
           <div className="backup-graph-label">Battery level (24h)</div>
           <div className="backup-graph">
-            <BatteryGraph history={backup.history_24h} />
+            <BatteryGraph history={backup.history24h} />
           </div>
         </div>
       </div>

@@ -18,9 +18,9 @@
  * revalidate, only successful HTTP responses are cached.
  */
 
-import { dataFetchConfig, weatherConfig, fxConfig, loggingConfig } from './config'
+import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, loggingConfig } from './config'
 import { formatKyivDateTimeForLog } from './time-utils'
-import type { WeatherData, FxData, FxPoint } from './types'
+import type { WeatherData, FxData, FxPoint, HourlyForecast, OutageSchedule, OutageSlot, HourlyOutage } from './types'
 
 // =============================================================================
 // Diagnostic Logging
@@ -49,6 +49,8 @@ const buildWeatherUrl = (): string => {
   url.searchParams.set('latitude', String(weatherConfig.latitude))
   url.searchParams.set('longitude', String(weatherConfig.longitude))
   url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code')
+  url.searchParams.set('hourly', 'temperature_2m,weather_code')
+  url.searchParams.set('forecast_hours', '8')
   url.searchParams.set('timezone', weatherConfig.timezone)
   return url.toString()
 }
@@ -78,6 +80,18 @@ export const fetchWeather = async (): Promise<WeatherData | null> => {
       throw new Error('Weather payload missing current data')
     }
 
+    // Parse hourly forecast data
+    const hourlyData = payload.hourly
+    let hourly: HourlyForecast[] = []
+
+    if (hourlyData?.time && hourlyData?.temperature_2m && hourlyData?.weather_code) {
+      hourly = hourlyData.time.map((time: string, index: number) => ({
+        time,
+        temperature: hourlyData.temperature_2m[index],
+        weatherCode: hourlyData.weather_code[index],
+      }))
+    }
+
     const data: WeatherData = {
       temperature: current.temperature_2m,
       humidity: current.relative_humidity_2m,
@@ -85,11 +99,13 @@ export const fetchWeather = async (): Promise<WeatherData | null> => {
       weatherCode: current.weather_code,
       time: current.time,
       fetchedAt: new Date().toISOString(),
+      hourly,
     }
 
     logImportant('weather', '✓ Weather data fetched from external API', {
       temp: data.temperature,
       code: data.weatherCode,
+      hourlyPoints: hourly.length,
       fetchedAt: data.fetchedAt,
     })
     return data
@@ -257,6 +273,158 @@ export const fetchFx = async (): Promise<FxData | null> => {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logImportant('fx', '✗ Failed to fetch FX:', message)
     return null
+  }
+}
+
+// =============================================================================
+// Power Outage Fetcher (Yasno API)
+// =============================================================================
+
+/**
+ * Convert minute-based slots to hourly fractions for display.
+ * Each hour gets a fraction (0-1) representing how much of that hour has outage.
+ */
+function slotsToHourlyFractions(slots: OutageSlot[]): HourlyOutage[] {
+  const hourlyFractions: number[] = new Array(24).fill(0)
+
+  for (const slot of slots) {
+    if (slot.type !== 'Definite') continue
+
+    // Convert minutes to hour boundaries
+    const startHour = Math.floor(slot.start / 60)
+    const endHour = Math.floor(slot.end / 60)
+    const startMinuteInHour = slot.start % 60
+    const endMinuteInHour = slot.end % 60
+
+    for (let hour = startHour; hour <= endHour && hour < 24; hour++) {
+      let minutesInThisHour = 60
+
+      if (hour === startHour) {
+        minutesInThisHour = 60 - startMinuteInHour
+      }
+      if (hour === endHour) {
+        minutesInThisHour = hour === startHour
+          ? endMinuteInHour - startMinuteInHour
+          : endMinuteInHour
+      }
+
+      hourlyFractions[hour] += minutesInThisHour / 60
+    }
+  }
+
+  // Cap at 1.0 and format as HourlyOutage
+  return hourlyFractions.map((fraction, hour) => ({
+    hour: hour.toString().padStart(2, '0'),
+    fraction: Math.min(fraction, 1),
+  }))
+}
+
+/**
+ * Parse Yasno API response for a specific group.
+ */
+function parseYasnoResponse(
+  payload: Record<string, unknown>,
+  groupId: string
+): { today: OutageSchedule['today']; tomorrow: OutageSchedule['tomorrow']; updatedOn: string } {
+  const groupData = payload[groupId] as {
+    today?: { date?: string; status?: string; slots?: Array<{ start?: number; end?: number; type?: string }> }
+    tomorrow?: { date?: string; status?: string; slots?: Array<{ start?: number; end?: number; type?: string }> }
+    updatedOn?: string
+  } | undefined
+
+  if (!groupData) {
+    throw new Error(`Group ${groupId} not found in response`)
+  }
+
+  const parseDay = (day: typeof groupData.today): OutageSchedule['today'] => {
+    if (!day || !day.date) return null
+
+    const slots: OutageSlot[] = (day.slots || [])
+      .filter((s): s is { start: number; end: number; type: string } =>
+        typeof s.start === 'number' && typeof s.end === 'number' && typeof s.type === 'string'
+      )
+      .map((s) => ({
+        start: s.start,
+        end: s.end,
+        type: s.type as 'Definite' | 'NotPlanned',
+      }))
+
+    return {
+      date: day.date,
+      status: day.status || 'Unknown',
+      slots,
+    }
+  }
+
+  return {
+    today: parseDay(groupData.today),
+    tomorrow: parseDay(groupData.tomorrow),
+    updatedOn: groupData.updatedOn || new Date().toISOString(),
+  }
+}
+
+/**
+ * Fetch power outage schedule from Yasno API.
+ * Returns schedule for the configured group ID.
+ */
+export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
+  logImportant('outage', '→ Fetching outage schedule from Yasno API')
+
+  try {
+    const response = await fetch(outageConfig.apiUrl, {
+      next: { revalidate: dataFetchConfig.outageRevalidateSeconds },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Yasno API responded with ${response.status}`)
+    }
+
+    const payload = await response.json()
+    const { today, tomorrow, updatedOn } = parseYasnoResponse(payload, outageConfig.groupId)
+
+    const data: OutageSchedule = {
+      today,
+      tomorrow,
+      groupId: outageConfig.groupId,
+      updatedOn,
+      fetchedAt: new Date().toISOString(),
+    }
+
+    logImportant('outage', '✓ Outage schedule fetched', {
+      groupId: data.groupId,
+      todaySlots: today?.slots.length || 0,
+      tomorrowSlots: tomorrow?.slots.length || 0,
+      fetchedAt: data.fetchedAt,
+    })
+
+    return data
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    logImportant('outage', '✗ Failed to fetch outage schedule:', message)
+    return null
+  }
+}
+
+/**
+ * Get hourly outage fractions for display in the panel.
+ * Converts slot-based schedule to 24-hour fractions.
+ */
+export const getHourlyOutages = (schedule: OutageSchedule | null): {
+  today: HourlyOutage[]
+  tomorrow: HourlyOutage[]
+} => {
+  const emptyDay: HourlyOutage[] = Array.from({ length: 24 }, (_, i) => ({
+    hour: i.toString().padStart(2, '0'),
+    fraction: 0,
+  }))
+
+  if (!schedule) {
+    return { today: emptyDay, tomorrow: emptyDay }
+  }
+
+  return {
+    today: schedule.today ? slotsToHourlyFractions(schedule.today.slots) : emptyDay,
+    tomorrow: schedule.tomorrow ? slotsToHourlyFractions(schedule.tomorrow.slots) : emptyDay,
   }
 }
 
