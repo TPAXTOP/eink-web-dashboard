@@ -49,8 +49,8 @@ async function getAccessToken(): Promise<string | null> {
   }
 
   // Validate config
-  if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || !deyeConfig.password) {
-    logImportant('deye', '⚠ Missing Deye credentials (DEYE_APP_ID, DEYE_APP_SECRET, DEYE_EMAIL, DEYE_PASSWORD)')
+  if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || (!deyeConfig.password && !deyeConfig.hashedPassword)) {
+    logImportant('deye', '⚠ Missing Deye credentials (DEYE_APP_ID, DEYE_APP_SECRET, DEYE_EMAIL, DEYE_PASSWORD or DEYE_HASHED_PASSWORD)')
     return null
   }
 
@@ -67,7 +67,7 @@ async function getAccessToken(): Promise<string | null> {
       body: JSON.stringify({
         appSecret: deyeConfig.appSecret,
         email: deyeConfig.email,
-        password: hashPassword(deyeConfig.password),
+        password: deyeConfig.hashedPassword || hashPassword(deyeConfig.password),
       }),
       cache: 'no-store', // Don't cache auth requests
     })
@@ -299,7 +299,7 @@ export async function fetchBackupPower(): Promise<BackupPowerData | null> {
   logImportant('deye', '→ Fetching backup power data')
 
   // Check if Deye is configured
-  if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || !deyeConfig.password || !deyeConfig.deviceSn) {
+  if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || (!deyeConfig.password && !deyeConfig.hashedPassword) || !deyeConfig.deviceSn) {
     logImportant('deye', '⚠ Deye not configured - using mock data')
     return null
   }

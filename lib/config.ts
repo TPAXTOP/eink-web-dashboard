@@ -112,6 +112,12 @@ export const deyeConfig = {
   password: process.env.DEYE_PASSWORD || '',
 
   /**
+   * Account password (already SHA256 hashed).
+   * Use DEYE_PASSWORD for plain password in development, this for production.
+   */
+  hashedPassword: process.env.DEYE_PASSWORD_HASHED || '',
+
+  /**
    * Device serial number to monitor.
    */
   deviceSn: process.env.DEYE_DEVICE_SN || '',

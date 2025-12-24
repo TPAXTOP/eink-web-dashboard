@@ -79,4 +79,5 @@ All timestamps must display in Kyiv timezone (`Europe/Kyiv`). Use utilities from
 Required in `.env.local` for development or Vercel settings for production:
 ```
 EXCHANGERATE_API_KEY=<your_key>
+DEYE_PASSWORD_HASHED=<your_hashed_password>
 ```
