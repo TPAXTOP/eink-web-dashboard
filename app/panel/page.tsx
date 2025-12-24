@@ -410,18 +410,26 @@ function OutageTile({
   hour,
   fraction,
   halfAffected,
+  scheduleUnavailable = false,
 }: {
   hour: string
   fraction: number
   halfAffected: 'none' | 'first' | 'second' | 'both'
+  scheduleUnavailable?: boolean
 }) {
   const tileWidth = 23
   const tileHeight = 32
+
+  // Light grey color for unavailable schedule
+  const greyColor = '#999'
 
   // Determine visual state
   const isFullOutage = fraction >= 1 || halfAffected === 'both'
   const isNoOutage = fraction === 0
   const isPartial = !isNoOutage && !isFullOutage
+
+  // When schedule is unavailable, use grey instead of black
+  const fillColor = scheduleUnavailable ? greyColor : '#000'
 
   // Text positioning and color based on state
   let textX = tileWidth / 2
@@ -448,19 +456,19 @@ function OutageTile({
       {/* White background */}
       <rect x="0" y="0" width={tileWidth} height={tileHeight} fill="#fff" />
 
-      {/* Full outage: solid black */}
+      {/* Full outage: solid fill (black or grey depending on schedule availability) */}
       {isFullOutage && (
-        <rect x="0" y="0" width={tileWidth} height={tileHeight} fill="#000" />
+        <rect x="0" y="0" width={tileWidth} height={tileHeight} fill={fillColor} />
       )}
 
       {/* Partial outage: diagonal fill */}
       {isPartial && halfAffected === 'first' && (
         // Left triangle (bottom-left to top-right diagonal, left side filled)
-        <polygon points={`0,${tileHeight} 0,0 ${tileWidth},0`} fill="#000" />
+        <polygon points={`0,${tileHeight} 0,0 ${tileWidth},0`} fill={fillColor} />
       )}
       {isPartial && halfAffected === 'second' && (
         // Right triangle (bottom-left to top-right diagonal, right side filled)
-        <polygon points={`0,${tileHeight} ${tileWidth},0 ${tileWidth},${tileHeight}`} fill="#000" />
+        <polygon points={`0,${tileHeight} ${tileWidth},0 ${tileWidth},${tileHeight}`} fill={fillColor} />
       )}
 
       {/* Hour label */}
@@ -483,16 +491,24 @@ function OutageTile({
 function OutageRow({
   label,
   schedule,
+  scheduleApplies = true,
 }: {
   label: string
   schedule: { hour: string; fraction: number; halfAffected: 'none' | 'first' | 'second' | 'both' }[]
+  scheduleApplies?: boolean
 }) {
   return (
     <div className="outage-day">
       <span className="outage-day-label">{label}</span>
       <div className="outage-tiles">
         {schedule.map((s, i) => (
-          <OutageTile key={i} hour={s.hour} fraction={s.fraction} halfAffected={s.halfAffected} />
+          <OutageTile
+            key={i}
+            hour={s.hour}
+            fraction={s.fraction}
+            halfAffected={s.halfAffected}
+            scheduleUnavailable={!scheduleApplies}
+          />
         ))}
       </div>
     </div>
@@ -563,8 +579,16 @@ export default async function PanelPage() {
         {/* Power Outage Schedule Widget - Top */}
         <div className="outage-widget">
           <div className="outage-title">Power outage</div>
-          <OutageRow label="Today" schedule={outage.today} />
-          <OutageRow label="Tomorrow" schedule={outage.tomorrow} />
+          <OutageRow
+            label="Today"
+            schedule={outage.today.hours}
+            scheduleApplies={outage.today.scheduleApplies}
+          />
+          <OutageRow
+            label="Tomorrow"
+            schedule={outage.tomorrow.hours}
+            scheduleApplies={outage.tomorrow.scheduleApplies}
+          />
         </div>
 
         {/* Backup Power Supply Widget - Bottom */}

@@ -421,10 +421,11 @@ export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
 /**
  * Get hourly outage fractions for display in the panel.
  * Converts slot-based schedule to 24-hour fractions.
+ * Also returns whether the schedule applies (is confirmed) for each day.
  */
 export const getHourlyOutages = (schedule: OutageSchedule | null): {
-  today: HourlyOutage[]
-  tomorrow: HourlyOutage[]
+  today: { hours: HourlyOutage[]; scheduleApplies: boolean }
+  tomorrow: { hours: HourlyOutage[]; scheduleApplies: boolean }
 } => {
   const emptyDay: HourlyOutage[] = Array.from({ length: 24 }, (_, i) => ({
     hour: i.toString().padStart(2, '0'),
@@ -433,12 +434,21 @@ export const getHourlyOutages = (schedule: OutageSchedule | null): {
   }))
 
   if (!schedule) {
-    return { today: emptyDay, tomorrow: emptyDay }
+    return {
+      today: { hours: emptyDay, scheduleApplies: false },
+      tomorrow: { hours: emptyDay, scheduleApplies: false },
+    }
   }
 
   return {
-    today: schedule.today ? slotsToHourlyFractions(schedule.today.slots) : emptyDay,
-    tomorrow: schedule.tomorrow ? slotsToHourlyFractions(schedule.tomorrow.slots) : emptyDay,
+    today: {
+      hours: schedule.today ? slotsToHourlyFractions(schedule.today.slots) : emptyDay,
+      scheduleApplies: schedule.today?.status === 'ScheduleApplies',
+    },
+    tomorrow: {
+      hours: schedule.tomorrow ? slotsToHourlyFractions(schedule.tomorrow.slots) : emptyDay,
+      scheduleApplies: schedule.tomorrow?.status === 'ScheduleApplies',
+    },
   }
 }
 

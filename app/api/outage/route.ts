@@ -24,13 +24,15 @@ export async function GET() {
         date: schedule.today?.date || null,
         status: schedule.today?.status || null,
         slots: schedule.today?.slots || [],
-        hourly: hourly.today,
+        hourly: hourly.today.hours,
+        scheduleApplies: hourly.today.scheduleApplies,
       },
       tomorrow: {
         date: schedule.tomorrow?.date || null,
         status: schedule.tomorrow?.status || null,
         slots: schedule.tomorrow?.slots || [],
-        hourly: hourly.tomorrow,
+        hourly: hourly.tomorrow.hours,
+        scheduleApplies: hourly.tomorrow.scheduleApplies,
       },
     })
   }
