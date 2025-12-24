@@ -175,8 +175,8 @@ function RainIcon({ size = 48 }: { size?: number }) {
 }
 
 function BatteryIcon({ pct }: { pct: number }) {
-  const fillHeight = Math.round((pct / 100) * 32)
-  const fillY = 8 + (32 - fillHeight)
+  const fillHeight = Math.round((pct / 100) * 30)
+  const fillY = 10 + (30 - fillHeight)
   return (
     <svg
       width="32"
@@ -185,9 +185,22 @@ function BatteryIcon({ pct }: { pct: number }) {
       fill="none"
       style={{ shapeRendering: 'crispEdges' }}
     >
-      <rect x="4" y="8" width="24" height="36" stroke="#000" strokeWidth="2" fill="none" />
-      <rect x="10" y="2" width="12" height="6" stroke="#000" strokeWidth="2" fill="none" />
-      <rect x="6" y={fillY} width="20" height={fillHeight} fill="#000" />
+      {/* Rounded battery body */}
+      <rect x="4" y="8" width="24" height="36" rx="4" ry="4" stroke="#000" strokeWidth="2" fill="none" />
+      {/* Rounded terminal/cap */}
+      <rect x="11" y="2" width="10" height="6" rx="2" ry="2" stroke="#000" strokeWidth="2" fill="#000" />
+      {/* Battery fill with rounded bottom */}
+      {fillHeight > 0 && (
+        <rect
+          x="6"
+          y={fillY}
+          width="20"
+          height={fillHeight}
+          rx={fillY > 36 ? 2 : 0}
+          ry={fillY > 36 ? 2 : 0}
+          fill="#000"
+        />
+      )}
     </svg>
   )
 }
@@ -201,10 +214,13 @@ function GridOnIcon() {
       fill="none"
       style={{ shapeRendering: 'crispEdges' }}
     >
-      <rect x="2" y="2" width="20" height="20" fill="#000" stroke="#000" strokeWidth="2" />
-      <line x1="7" y1="8" x2="7" y2="16" stroke="#fff" strokeWidth="2" />
-      <line x1="12" y1="6" x2="12" y2="18" stroke="#fff" strokeWidth="2" />
-      <line x1="17" y1="8" x2="17" y2="16" stroke="#fff" strokeWidth="2" />
+      {/* Solid lightning bolt - power connected */}
+      <polygon
+        points="13,2 6,14 11,14 11,22 18,10 13,10"
+        fill="#000"
+        stroke="#000"
+        strokeWidth="1"
+      />
     </svg>
   )
 }
@@ -218,9 +234,15 @@ function GridOffIcon() {
       fill="none"
       style={{ shapeRendering: 'crispEdges' }}
     >
-      <rect x="2" y="2" width="20" height="20" fill="none" stroke="#000" strokeWidth="2" />
+      {/* Outlined lightning bolt with strike-through - power disconnected */}
+      <polygon
+        points="13,2 6,14 11,14 11,22 18,10 13,10"
+        fill="none"
+        stroke="#000"
+        strokeWidth="2"
+      />
+      {/* Diagonal strike-through */}
       <line x1="4" y1="4" x2="20" y2="20" stroke="#000" strokeWidth="2" />
-      <line x1="20" y1="4" x2="4" y2="20" stroke="#000" strokeWidth="2" />
     </svg>
   )
 }
@@ -245,9 +267,9 @@ function WeatherIcon({ icon, size = 48 }: { icon: string; size?: number }) {
 // =============================================================================
 
 function BatteryGraph({ history }: { history: { time: string; percent: number }[] }) {
-  const width = 560
-  const height = 100
-  const padding = { top: 10, right: 40, bottom: 20, left: 40 }
+  const width = 528
+  const height = 180
+  const padding = { top: 16, right: 8, bottom: 32, left: 36 }
   const graphWidth = width - padding.left - padding.right
   const graphHeight = height - padding.top - padding.bottom
 
@@ -265,9 +287,20 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
   const scaleX = (i: number) => padding.left + (i / (history.length - 1)) * graphWidth
   const scaleY = (v: number) => padding.top + graphHeight - (v / 100) * graphHeight
 
+  // Calculate x positions for time ticks (assuming 24 data points = hourly data)
+  const tickPositions = {
+    major: [0, 6, 12, 18, 24].map((h) => ({
+      x: padding.left + (h / 24) * graphWidth,
+      label: h === 24 ? 'Now' : `-${24 - h}h`,
+    })),
+    minor: [3, 9, 15, 21].map((h) => padding.left + (h / 24) * graphWidth),
+  }
+
   const points = history
     .map((h, i) => `${scaleX(i).toFixed(0)},${scaleY(h.percent).toFixed(0)}`)
     .join(' ')
+
+  const baselineY = padding.top + graphHeight
 
   return (
     <svg
@@ -278,45 +311,37 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
     >
       {/* Y-axis labels */}
       <text
-        x={padding.left - 4}
-        y={padding.top + 4}
+        x={padding.left - 6}
+        y={padding.top + 5}
         textAnchor="end"
-        fontSize="10"
-        fontFamily="monospace"
+        fontSize="12"
+        fontWeight="600"
+        fontFamily="inherit"
         fill="#000"
       >
         100%
       </text>
       <text
-        x={padding.left - 4}
-        y={padding.top + graphHeight}
+        x={padding.left - 6}
+        y={scaleY(50) + 4}
         textAnchor="end"
-        fontSize="10"
-        fontFamily="monospace"
+        fontSize="12"
+        fontWeight="600"
+        fontFamily="inherit"
+        fill="#000"
+      >
+        50%
+      </text>
+      <text
+        x={padding.left - 6}
+        y={padding.top + graphHeight + 4}
+        textAnchor="end"
+        fontSize="12"
+        fontWeight="600"
+        fontFamily="inherit"
         fill="#000"
       >
         0%
-      </text>
-      {/* X-axis labels */}
-      <text
-        x={padding.left}
-        y={height - 4}
-        textAnchor="start"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="#000"
-      >
-        24h
-      </text>
-      <text
-        x={width - padding.right}
-        y={height - 4}
-        textAnchor="end"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="#000"
-      >
-        Now
       </text>
       {/* Grid lines */}
       <line
@@ -326,7 +351,7 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
         y2={padding.top}
         stroke="#000"
         strokeWidth="1"
-        strokeDasharray="2,4"
+        strokeDasharray="4,6"
       />
       <line
         x1={padding.left}
@@ -335,44 +360,83 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
         y2={scaleY(50)}
         stroke="#000"
         strokeWidth="1"
-        strokeDasharray="2,4"
+        strokeDasharray="4,6"
       />
       <line
         x1={padding.left}
-        y1={padding.top + graphHeight}
+        y1={baselineY}
         x2={width - padding.right}
-        y2={padding.top + graphHeight}
+        y2={baselineY}
         stroke="#000"
-        strokeWidth="1"
+        strokeWidth="2"
       />
-      {/* Axes */}
+      {/* Y-axis */}
       <line
         x1={padding.left}
         y1={padding.top}
         x2={padding.left}
-        y2={padding.top + graphHeight}
+        y2={baselineY}
         stroke="#000"
-        strokeWidth="1"
+        strokeWidth="2"
       />
-      {/* Data line */}
-      <polyline points={points} fill="none" stroke="#000" strokeWidth="2" />
+      {/* X-axis minor ticks (3h intervals) */}
+      {tickPositions.minor.map((x, i) => (
+        <line key={`minor-${i}`} x1={x} y1={baselineY} x2={x} y2={baselineY + 4} stroke="#000" strokeWidth="1" />
+      ))}
+      {/* X-axis major ticks (6h intervals) with labels */}
+      {tickPositions.major.map((tick, i) => (
+        <g key={`major-${i}`}>
+          <line x1={tick.x} y1={baselineY} x2={tick.x} y2={baselineY + 8} stroke="#000" strokeWidth="2" />
+          <text
+            x={tick.x}
+            y={baselineY + 20}
+            textAnchor="middle"
+            fontSize="10"
+            fontWeight="600"
+            fontFamily="inherit"
+            fill="#000"
+          >
+            {tick.label}
+          </text>
+        </g>
+      ))}
+      {/* Data line - thicker for e-paper */}
+      <polyline points={points} fill="none" stroke="#000" strokeWidth="3" />
     </svg>
   )
 }
 
-function OutageTile({ hour, fraction }: { hour: string; fraction: number }) {
+function OutageTile({
+  hour,
+  fraction,
+  halfAffected,
+}: {
+  hour: string
+  fraction: number
+  halfAffected: 'none' | 'first' | 'second' | 'both'
+}) {
   const tileWidth = 23
-  const tileHeight = 28
+  const tileHeight = 32
 
-  let fillContent = null
-  if (fraction === 1) {
-    fillContent = <rect x="1" y="1" width={tileWidth - 2} height={tileHeight - 2} fill="#000" />
-  } else if (fraction > 0) {
-    const fillWidth = Math.round((tileWidth - 2) * fraction)
-    fillContent = <rect x="1" y="1" width={fillWidth} height={tileHeight - 2} fill="#000" />
+  // Determine visual state
+  const isFullOutage = fraction >= 1 || halfAffected === 'both'
+  const isNoOutage = fraction === 0
+  const isPartial = !isNoOutage && !isFullOutage
+
+  // Text positioning and color based on state
+  let textX = tileWidth / 2
+  let textColor = '#000'
+
+  if (isFullOutage) {
+    textColor = '#fff'
+  } else if (isPartial) {
+    // Position text in the white area for contrast
+    if (halfAffected === 'first') {
+      textX = tileWidth * 0.7 // Right side (white area)
+    } else if (halfAffected === 'second') {
+      textX = tileWidth * 0.3 // Left side (white area)
+    }
   }
-
-  const textColor = fraction >= 0.5 ? '#fff' : '#000'
 
   return (
     <svg
@@ -381,22 +445,33 @@ function OutageTile({ hour, fraction }: { hour: string; fraction: number }) {
       viewBox={`0 0 ${tileWidth} ${tileHeight}`}
       style={{ shapeRendering: 'crispEdges' }}
     >
-      <rect
-        x="0"
-        y="0"
-        width={tileWidth}
-        height={tileHeight}
-        fill="none"
-        stroke="#000"
-        strokeWidth="1"
-      />
-      {fillContent}
+      {/* White background */}
+      <rect x="0" y="0" width={tileWidth} height={tileHeight} fill="#fff" />
+
+      {/* Full outage: solid black */}
+      {isFullOutage && (
+        <rect x="0" y="0" width={tileWidth} height={tileHeight} fill="#000" />
+      )}
+
+      {/* Partial outage: diagonal fill */}
+      {isPartial && halfAffected === 'first' && (
+        // Left triangle (bottom-left to top-right diagonal, left side filled)
+        <polygon points={`0,${tileHeight} 0,0 ${tileWidth},0`} fill="#000" />
+      )}
+      {isPartial && halfAffected === 'second' && (
+        // Right triangle (bottom-left to top-right diagonal, right side filled)
+        <polygon points={`0,${tileHeight} ${tileWidth},0 ${tileWidth},${tileHeight}`} fill="#000" />
+      )}
+
+      {/* Hour label */}
       <text
-        x={tileWidth / 2}
-        y={tileHeight / 2 + 4}
+        x={textX}
+        y={tileHeight / 2}
         textAnchor="middle"
-        fontSize="10"
-        fontFamily="monospace"
+        dominantBaseline="middle"
+        fontSize="11"
+        fontWeight="700"
+        fontFamily="inherit"
         fill={textColor}
       >
         {hour}
@@ -410,14 +485,14 @@ function OutageRow({
   schedule,
 }: {
   label: string
-  schedule: { hour: string; fraction: number }[]
+  schedule: { hour: string; fraction: number; halfAffected: 'none' | 'first' | 'second' | 'both' }[]
 }) {
   return (
-    <div className="outage-row">
-      <span className="outage-label">{label}</span>
+    <div className="outage-day">
+      <span className="outage-day-label">{label}</span>
       <div className="outage-tiles">
         {schedule.map((s, i) => (
-          <OutageTile key={i} hour={s.hour} fraction={s.fraction} />
+          <OutageTile key={i} hour={s.hour} fraction={s.fraction} halfAffected={s.halfAffected} />
         ))}
       </div>
     </div>
@@ -446,11 +521,11 @@ export default async function PanelPage() {
   const currentIcon = weatherData ? weatherCodeToIcon(weatherData.weatherCode) : 'cloudy'
   const currentCondition = weatherData ? describeWeather(weatherData.weatherCode) : 'No data'
   const currentTemp = weatherData ? Math.round(weatherData.temperature) : '--'
-  const hourlyForecast = weatherData?.hourly?.slice(0, 8) || []
+  const hourlyForecast = weatherData?.hourly?.slice(0, 6) || []
 
   return (
     <div className="panel-container">
-      {/* Weather Widget - Left Column (200px) */}
+      {/* Weather Widget - Left Column (240px) */}
       <div className="weather-column">
         <div className="weather-header">
           <div className="weather-city">Kyiv, Ukraine</div>
@@ -483,32 +558,23 @@ export default async function PanelPage() {
         </div>
       </div>
 
-      {/* Right Column (600px) */}
+      {/* Right Column (560px) */}
       <div className="right-column">
         {/* Power Outage Schedule Widget - Top */}
         <div className="outage-widget">
           <div className="outage-title">Power outage</div>
           <OutageRow label="Today" schedule={outage.today} />
           <OutageRow label="Tomorrow" schedule={outage.tomorrow} />
-          <div className="outage-legend">
-            <div className="legend-item">
-              <div className="legend-box"></div>
-              <span>No outage</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-box filled"></div>
-              <span>Full outage</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-box partial"></div>
-              <span>Partial</span>
-            </div>
-          </div>
         </div>
 
         {/* Backup Power Supply Widget - Bottom */}
         <div className="backup-widget">
-          <div className="backup-title">Backup power supply</div>
+          <div className="backup-title-row">
+            <span className="backup-title">Backup power supply</span>
+            <span className="backup-timestamp">
+              Updated: {formatKyivDateTimeForDisplay(backup.lastUpdate)}
+            </span>
+          </div>
           <div className="backup-header">
             <div className="backup-battery">
               <BatteryIcon pct={backup.batteryPercent} />
@@ -518,11 +584,7 @@ export default async function PanelPage() {
               {backup.gridConnected ? <GridOnIcon /> : <GridOffIcon />}
               <span>Grid: {backup.gridConnected ? 'Connected' : 'Disconnected'}</span>
             </div>
-            <div className="backup-timestamp">
-              Updated: {formatKyivDateTimeForDisplay(backup.lastUpdate)}
-            </div>
           </div>
-          <div className="backup-graph-label">Battery level (24h)</div>
           <div className="backup-graph">
             <BatteryGraph history={backup.history24h} />
           </div>

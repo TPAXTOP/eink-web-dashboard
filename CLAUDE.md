@@ -53,7 +53,7 @@ Request → Server Component → fetchDashboardData() (lib/data-fetchers.ts)
 - Fixed 800x480 pixel viewport
 - **Monochrome only**: Pure black (#000000) and white (#FFFFFF)
 - No animations, gradients, or shadows
-- System fonts only
+- Use readable fonts with thick strokes (no thin/light weights). Web fonts allowed.
 
 ### Data Fetching Pattern
 ```typescript

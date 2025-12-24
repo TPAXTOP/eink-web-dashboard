@@ -282,41 +282,54 @@ export const fetchFx = async (): Promise<FxData | null> => {
 
 /**
  * Convert minute-based slots to hourly fractions for display.
- * Each hour gets a fraction (0-1) representing how much of that hour has outage.
+ * Each hour gets a fraction (0-1) representing how much of that hour has outage,
+ * plus which half of the hour (first 30 min or second 30 min) is affected.
  */
 function slotsToHourlyFractions(slots: OutageSlot[]): HourlyOutage[] {
-  const hourlyFractions: number[] = new Array(24).fill(0)
+  const firstHalfMinutes: number[] = new Array(24).fill(0)
+  const secondHalfMinutes: number[] = new Array(24).fill(0)
 
   for (const slot of slots) {
     if (slot.type !== 'Definite') continue
 
-    // Convert minutes to hour boundaries
-    const startHour = Math.floor(slot.start / 60)
-    const endHour = Math.floor(slot.end / 60)
-    const startMinuteInHour = slot.start % 60
-    const endMinuteInHour = slot.end % 60
+    // Process each minute in the slot
+    for (let minute = slot.start; minute < slot.end && minute < 1440; minute++) {
+      const hour = Math.floor(minute / 60)
+      const minuteInHour = minute % 60
+      if (hour >= 24) break
 
-    for (let hour = startHour; hour <= endHour && hour < 24; hour++) {
-      let minutesInThisHour = 60
-
-      if (hour === startHour) {
-        minutesInThisHour = 60 - startMinuteInHour
+      if (minuteInHour < 30) {
+        firstHalfMinutes[hour]++
+      } else {
+        secondHalfMinutes[hour]++
       }
-      if (hour === endHour) {
-        minutesInThisHour = hour === startHour
-          ? endMinuteInHour - startMinuteInHour
-          : endMinuteInHour
-      }
-
-      hourlyFractions[hour] += minutesInThisHour / 60
     }
   }
 
-  // Cap at 1.0 and format as HourlyOutage
-  return hourlyFractions.map((fraction, hour) => ({
-    hour: hour.toString().padStart(2, '0'),
-    fraction: Math.min(fraction, 1),
-  }))
+  // Convert to HourlyOutage format
+  return Array.from({ length: 24 }, (_, hour) => {
+    const firstHalf = Math.min(firstHalfMinutes[hour], 30)
+    const secondHalf = Math.min(secondHalfMinutes[hour], 30)
+    const totalMinutes = firstHalf + secondHalf
+    const fraction = Math.min(totalMinutes / 60, 1)
+
+    let halfAffected: 'none' | 'first' | 'second' | 'both'
+    if (firstHalf > 0 && secondHalf > 0) {
+      halfAffected = 'both'
+    } else if (firstHalf > 0) {
+      halfAffected = 'first'
+    } else if (secondHalf > 0) {
+      halfAffected = 'second'
+    } else {
+      halfAffected = 'none'
+    }
+
+    return {
+      hour: hour.toString().padStart(2, '0'),
+      fraction,
+      halfAffected,
+    }
+  })
 }
 
 /**
@@ -416,6 +429,7 @@ export const getHourlyOutages = (schedule: OutageSchedule | null): {
   const emptyDay: HourlyOutage[] = Array.from({ length: 24 }, (_, i) => ({
     hour: i.toString().padStart(2, '0'),
     fraction: 0,
+    halfAffected: 'none' as const,
   }))
 
   if (!schedule) {

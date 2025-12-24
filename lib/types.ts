@@ -63,6 +63,7 @@ export type OutageSchedule = {
 export type HourlyOutage = {
   hour: string // "00" - "23"
   fraction: number // 0 to 1
+  halfAffected: 'none' | 'first' | 'second' | 'both' // which 30-min half has outage
 }
 
 // =============================================================================

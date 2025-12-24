@@ -14,68 +14,75 @@
   height: 480px;
   background: #fff;
   color: #000;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: 'IBM Plex Mono', 'Roboto Mono', 'Consolas', monospace;
   font-size: 12px;
-  line-height: 1.2;
+  font-weight: 500;
+  line-height: 1.3;
 }
 
-/* Weather Column - Left */
+/* Weather Column - Left (wider) */
 .weather-column {
-  width: 200px;
+  width: 240px;
   height: 480px;
-  border-right: 1px solid #000;
+  border-right: 2px solid #000;
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: 12px;
 }
 
 .weather-header {
   text-align: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #000;
-  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #000;
+  margin-bottom: 10px;
 }
 
 .weather-city {
-  font-size: 14px;
-  font-weight: bold;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
 }
 
 .weather-current {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #000;
-  margin-bottom: 8px;
+  padding: 10px 0 12px;
+  border-bottom: 2px solid #000;
+  margin-bottom: 10px;
 }
 
 .weather-icon {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .weather-temp {
-  font-size: 42px;
-  font-weight: bold;
+  font-size: 52px;
+  font-weight: 700;
   line-height: 1;
+  letter-spacing: -2px;
 }
 
 .weather-condition {
-  font-size: 11px;
-  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 6px;
+  text-transform: capitalize;
 }
 
 .weather-hourly-title {
-  font-size: 11px;
-  font-weight: bold;
-  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .weather-hourly {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   overflow: hidden;
 }
 
@@ -83,29 +90,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 0;
-  border-bottom: 1px dotted #000;
-}
-
-.hourly-item:last-child {
-  border-bottom: none;
+  padding: 4px 0;
+  height: 32px;
 }
 
 .hourly-time {
-  font-size: 11px;
-  width: 40px;
+  font-size: 13px;
+  font-weight: 600;
+  width: 48px;
 }
 
 .hourly-temp {
-  font-size: 14px;
-  font-weight: bold;
-  width: 36px;
+  font-size: 16px;
+  font-weight: 700;
+  width: 40px;
   text-align: right;
 }
 
 /* Right Column */
 .right-column {
-  width: 600px;
+  width: 560px;
   height: 480px;
   display: flex;
   flex-direction: column;
@@ -113,123 +117,101 @@
 
 /* Outage Widget - Top Right */
 .outage-widget {
-  padding: 8px;
-  border-bottom: 1px solid #000;
+  padding: 12px 16px;
+  border-bottom: 2px solid #000;
 }
 
 .outage-title {
   font-size: 14px;
-  font-weight: bold;
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.outage-day {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 8px;
 }
 
-.outage-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.outage-row:last-child {
+.outage-day:last-of-type {
   margin-bottom: 0;
 }
 
-.outage-label {
-  width: 60px;
-  font-size: 11px;
-  font-weight: bold;
+.outage-day-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  text-transform: uppercase;
 }
 
 .outage-tiles {
   display: flex;
-  gap: 1px;
-}
-
-.outage-legend {
-  display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  font-size: 10px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.legend-box {
-  width: 12px;
-  height: 12px;
-  border: 1px solid #000;
-}
-
-.legend-box.filled {
-  background: #000;
-}
-
-.legend-box.partial {
-  background: linear-gradient(to right, #000 50%, #fff 50%);
+  gap: 0;
 }
 
 /* Backup Widget - Bottom Right */
 .backup-widget {
   flex: 1;
-  padding: 8px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
 }
 
+.backup-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .backup-title {
   font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .backup-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 8px;
+  gap: 24px;
+  margin-bottom: 4px;
 }
 
 .backup-battery {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .battery-pct {
-  font-size: 28px;
-  font-weight: bold;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -1px;
 }
 
 .backup-grid {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .backup-timestamp {
-  margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .backup-graph {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.backup-graph-label {
-  font-size: 11px;
-  font-weight: bold;
-  margin-bottom: 4px;
+  align-items: flex-start;
 }
 
 /* SVG crisp edges */
 svg {
   shape-rendering: crispEdges;
 }
-
