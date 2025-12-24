@@ -9,6 +9,11 @@ const timeFormatter = createFormatter({
   hour12: false,
 })
 
+const hourOnlyFormatter = createFormatter({
+  hour: '2-digit',
+  hour12: false,
+})
+
 const dateTimeFormatter = createFormatter({
   day: '2-digit',
   month: '2-digit',
@@ -131,9 +136,20 @@ export const formatShortDate = (value: string | undefined): string => {
  */
 export const formatShortDateTime = (value: string | undefined): string => {
   if (!value) return '--'
-  
+
   const date = parseDate(value)
   if (!date) return '--'
   return stripCommas(shortDateTimeFormatter.format(date))
+}
+
+/**
+ * Extract hour (HH) from ISO timestamp in Kyiv timezone.
+ * Returns two-digit hour string like "00", "06", "12", "18".
+ */
+export const extractKyivHour = (isoString: string): string => {
+  const date = parseDate(isoString)
+  if (!date) return '--'
+  // hourOnlyFormatter returns "HH" format in en-GB locale
+  return hourOnlyFormatter.format(date)
 }
 

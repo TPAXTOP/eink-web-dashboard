@@ -271,13 +271,20 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
       }
     }
 
-    // Sort by time and limit to 24 points (hourly)
+    // Sort by time chronologically (oldest first)
     points.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
 
-    // Sample to 24 points if we have more
-    if (points.length > 24) {
-      const step = Math.floor(points.length / 24)
-      return points.filter((_, i) => i % step === 0).slice(0, 24)
+    // Target 96 points for 15-minute granularity over 24 hours
+    const TARGET_HISTORY_POINTS = 96
+
+    // Downsample evenly if we have more points, ensuring the most recent point is always included
+    if (points.length > TARGET_HISTORY_POINTS) {
+      const step = (points.length - 1) / (TARGET_HISTORY_POINTS - 1)
+      const sampled: BatteryHistoryPoint[] = []
+      for (let i = 0; i < TARGET_HISTORY_POINTS; i++) {
+        sampled.push(points[Math.round(i * step)])
+      }
+      return sampled
     }
 
     return points

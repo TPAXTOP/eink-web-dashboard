@@ -8,7 +8,7 @@ import type { Metadata, Viewport } from 'next'
 import { fetchWeather, fetchOutageSchedule, getHourlyOutages } from '@/lib/data-fetchers'
 import { fetchBackupPower } from '@/lib/deye-api'
 import { describeWeather } from '@/lib/weather-codes'
-import { formatKyivDateTimeForDisplay } from '@/lib/time-utils'
+import { formatKyivDateTimeForDisplay, extractKyivHour } from '@/lib/time-utils'
 import './panel.css'
 
 // Revalidate every 15 minutes (matches outage schedule refresh)
@@ -67,12 +67,10 @@ const mockBackup = {
   batteryPercent: 90,
   gridConnected: true,
   lastUpdate: new Date().toISOString(),
-  history24h: [
-    95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 86, 87, 88, 88, 89, 90, 90, 89, 88, 88, 89, 90,
-    90,
-  ].map((percent, i) => ({
-    time: new Date(Date.now() - (23 - i) * 60 * 60 * 1000).toISOString(),
-    percent,
+  // 96 points at 15-minute intervals for 24 hours
+  history24h: Array.from({ length: 96 }, (_, i) => ({
+    time: new Date(Date.now() - (95 - i) * 15 * 60 * 1000).toISOString(),
+    percent: Math.round(85 + Math.sin(i / 8) * 10), // Varies between 75-95%
   })),
   fetchedAt: new Date().toISOString(),
 }
@@ -287,14 +285,29 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
   const scaleX = (i: number) => padding.left + (i / (history.length - 1)) * graphWidth
   const scaleY = (v: number) => padding.top + graphHeight - (v / 100) * graphHeight
 
-  // Calculate x positions for time ticks (assuming 24 data points = hourly data)
-  const tickPositions = {
-    major: [0, 6, 12, 18, 24].map((h) => ({
-      x: padding.left + (h / 24) * graphWidth,
-      label: h === 24 ? 'Now' : `-${24 - h}h`,
-    })),
-    minor: [3, 9, 15, 21].map((h) => padding.left + (h / 24) * graphWidth),
+  // Generate tick labels from actual data timestamps at 3-hour boundaries
+  const getTickLabels = (): { x: number; label: string }[] => {
+    const labels: { x: number; label: string }[] = []
+    let lastLabelHour = -1
+
+    for (let i = 0; i < history.length; i++) {
+      const hourStr = extractKyivHour(history[i].time)
+      const hour = parseInt(hourStr, 10)
+
+      // Show label at 3-hour boundaries (0, 3, 6, 9, 12, 15, 18, 21)
+      if (!isNaN(hour) && hour % 3 === 0 && hour !== lastLabelHour) {
+        labels.push({
+          x: scaleX(i),
+          label: hourStr,
+        })
+        lastLabelHour = hour
+      }
+    }
+
+    return labels
   }
+
+  const tickLabels = getTickLabels()
 
   const points = history
     .map((h, i) => `${scaleX(i).toFixed(0)},${scaleY(h.percent).toFixed(0)}`)
@@ -379,17 +392,13 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
         stroke="#000"
         strokeWidth="2"
       />
-      {/* X-axis minor ticks (3h intervals) */}
-      {tickPositions.minor.map((x, i) => (
-        <line key={`minor-${i}`} x1={x} y1={baselineY} x2={x} y2={baselineY + 4} stroke="#000" strokeWidth="1" />
-      ))}
-      {/* X-axis major ticks (6h intervals) with labels */}
-      {tickPositions.major.map((tick, i) => (
-        <g key={`major-${i}`}>
-          <line x1={tick.x} y1={baselineY} x2={tick.x} y2={baselineY + 8} stroke="#000" strokeWidth="2" />
+      {/* X-axis ticks at 3-hour intervals with absolute time labels */}
+      {tickLabels.map((tick, i) => (
+        <g key={`tick-${i}`}>
+          <line x1={tick.x} y1={baselineY} x2={tick.x} y2={baselineY + 6} stroke="#000" strokeWidth="2" />
           <text
             x={tick.x}
-            y={baselineY + 20}
+            y={baselineY + 18}
             textAnchor="middle"
             fontSize="10"
             fontWeight="600"
