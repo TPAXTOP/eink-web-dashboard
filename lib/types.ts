@@ -75,11 +75,18 @@ export type BatteryHistoryPoint = {
   percent: number // 0-100
 }
 
+export type ChargingStatus = 'discharging' | 'charging' | 'idle' | 'unknown'
+
 export type BackupPowerData = {
   batteryPercent: number // Current SOC (0-100)
   gridConnected: boolean // Grid connection status
   lastUpdate: string // Timestamp of last data update
   history24h: BatteryHistoryPoint[] // 24h battery history
   fetchedAt: string
+  // Power flow data for runtime estimation
+  batteryPowerWatts: number | null // Positive = discharging, negative = charging
+  loadPowerWatts: number | null // Current load consumption in watts
+  estimatedRuntimeMinutes: number | null // Calculated runtime when discharging
+  chargingStatus: ChargingStatus // Current battery state
 }
 

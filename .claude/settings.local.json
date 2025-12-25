@@ -17,7 +17,12 @@
       "Bash(timeout /t 5 /nobreak)",
       "Bash(timeout 3 bun run dev:*)",
       "Bash(cd:*)",
-      "WebFetch(domain:localhost)"
+      "WebFetch(domain:localhost)",
+      "WebFetch(domain:community.home-assistant.io)",
+      "Bash(timeout 5 npm run dev:*)",
+      "Bash(npx tsc:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(cat:*)"
     ]
   }
 }

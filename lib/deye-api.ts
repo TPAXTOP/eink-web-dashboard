@@ -8,7 +8,7 @@
 import { createHash } from 'crypto'
 import { deyeConfig, dataFetchConfig } from './config'
 import { formatKyivDateTimeForLog } from './time-utils'
-import type { BackupPowerData, BatteryHistoryPoint } from './types'
+import type { BackupPowerData, BatteryHistoryPoint, ChargingStatus } from './types'
 
 // =============================================================================
 // Logging
@@ -107,6 +107,68 @@ async function getAccessToken(): Promise<string | null> {
 }
 
 // =============================================================================
+// Measure Point Key Matching
+// =============================================================================
+
+/**
+ * Measure point key variants (different inverter models use different keys).
+ * Keys are matched case-insensitively with partial matching.
+ */
+const MEASURE_POINT_KEYS = {
+  batteryPower: ['batterypower', 'battppower', 'battery_power', 'batt_power'],
+  loadPower: ['loadpower', 'totalloadpower', 'load_power', 'total_load_power', 'usepower'],
+} as const
+
+/**
+ * Find a numeric value from dataList by checking multiple possible key names.
+ */
+function findValueByKeys(
+  dataList: Array<{ key?: string; value?: string }>,
+  keys: readonly string[]
+): number | null {
+  for (const item of dataList) {
+    const itemKey = item.key?.toLowerCase() || ''
+    if (keys.some((k) => itemKey.includes(k)) && item.value) {
+      const parsed = parseFloat(item.value)
+      if (!isNaN(parsed)) {
+        return parsed
+      }
+    }
+  }
+  return null
+}
+
+// =============================================================================
+// Runtime Calculation
+// =============================================================================
+
+/**
+ * Calculate estimated runtime in minutes based on battery capacity and discharge power.
+ * Formula: (capacity_wh * (soc/100)) / discharge_power_w * 60
+ */
+function calculateRuntimeMinutes(
+  batteryPercent: number,
+  dischargePowerWatts: number
+): number | null {
+  if (dischargePowerWatts <= 0) return null // Not discharging
+
+  const availableEnergyWh = deyeConfig.batteryCapacityWh * (batteryPercent / 100)
+  const runtimeHours = availableEnergyWh / dischargePowerWatts
+  return Math.round(runtimeHours * 60)
+}
+
+/**
+ * Determine charging status from battery power value.
+ * Positive = discharging, negative = charging, near zero = idle.
+ */
+function getChargingStatus(batteryPowerWatts: number | null): ChargingStatus {
+  if (batteryPowerWatts === null) return 'unknown'
+  if (batteryPowerWatts > 50) return 'discharging' // >50W threshold to avoid noise
+  if (batteryPowerWatts < -50) return 'charging' // <-50W threshold
+  return 'idle'
+}
+
+// =============================================================================
 // Device Data Fetching
 // =============================================================================
 
@@ -126,12 +188,14 @@ type DeviceLatestResponse = {
 }
 
 /**
- * Fetch latest device data including battery SOC and grid status.
+ * Fetch latest device data including battery SOC, grid status, and power flow.
  */
 async function fetchDeviceLatest(token: string): Promise<{
   batteryPercent: number
   gridConnected: boolean
   lastUpdate: string
+  batteryPowerWatts: number | null
+  loadPowerWatts: number | null
 } | null> {
   if (!deyeConfig.deviceSn) {
     logImportant('deye', '⚠ Missing DEYE_DEVICE_SN')
@@ -171,7 +235,7 @@ async function fetchDeviceLatest(token: string): Promise<{
       throw new Error('No device data in response')
     }
 
-    // Parse data list to find battery SOC and grid status
+    // Parse data list to find battery SOC, grid status, and power values
     const dataList = deviceData.dataList || []
     let batteryPercent = 0
     let gridConnected = false
@@ -191,6 +255,10 @@ async function fetchDeviceLatest(token: string): Promise<{
       }
     }
 
+    // Extract power flow data using flexible key matching
+    const batteryPowerWatts = findValueByKeys(dataList, MEASURE_POINT_KEYS.batteryPower)
+    const loadPowerWatts = findValueByKeys(dataList, MEASURE_POINT_KEYS.loadPower)
+
     // Convert Unix timestamp (seconds) to ISO string
     const lastUpdate = deviceData.collectionTime
       ? new Date(deviceData.collectionTime * 1000).toISOString()
@@ -200,6 +268,8 @@ async function fetchDeviceLatest(token: string): Promise<{
       batteryPercent,
       gridConnected,
       lastUpdate,
+      batteryPowerWatts,
+      loadPowerWatts,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
@@ -327,18 +397,34 @@ export async function fetchBackupPower(): Promise<BackupPowerData | null> {
       return null
     }
 
+    // Calculate charging status and runtime estimate
+    const chargingStatus = getChargingStatus(latest.batteryPowerWatts)
+    const estimatedRuntimeMinutes =
+      chargingStatus === 'discharging' && latest.batteryPowerWatts
+        ? calculateRuntimeMinutes(latest.batteryPercent, latest.batteryPowerWatts)
+        : null
+
     const data: BackupPowerData = {
       batteryPercent: latest.batteryPercent,
       gridConnected: latest.gridConnected,
       lastUpdate: latest.lastUpdate,
       history24h: history,
       fetchedAt: new Date().toISOString(),
+      // Power flow data
+      batteryPowerWatts: latest.batteryPowerWatts,
+      loadPowerWatts: latest.loadPowerWatts,
+      estimatedRuntimeMinutes,
+      chargingStatus,
     }
 
     logImportant('deye', '✓ Backup power data fetched', {
       battery: data.batteryPercent,
       grid: data.gridConnected,
       historyPoints: history.length,
+      batteryPower: data.batteryPowerWatts,
+      loadPower: data.loadPowerWatts,
+      runtime: data.estimatedRuntimeMinutes,
+      status: data.chargingStatus,
     })
 
     return data

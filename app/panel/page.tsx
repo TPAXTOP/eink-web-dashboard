@@ -73,6 +73,11 @@ const mockBackup = {
     percent: Math.round(85 + Math.sin(i / 8) * 10), // Varies between 75-95%
   })),
   fetchedAt: new Date().toISOString(),
+  // Power flow mock data
+  batteryPowerWatts: -350, // Negative = charging (grid connected)
+  loadPowerWatts: 450,
+  estimatedRuntimeMinutes: null, // Not discharging
+  chargingStatus: 'charging' as const,
 }
 
 // =============================================================================
@@ -176,28 +181,11 @@ function BatteryIcon({ pct }: { pct: number }) {
   const fillHeight = Math.round((pct / 100) * 30)
   const fillY = 10 + (30 - fillHeight)
   return (
-    <svg
-      width="32"
-      height="48"
-      viewBox="0 0 32 48"
-      fill="none"
-      style={{ shapeRendering: 'crispEdges' }}
-    >
-      {/* Rounded battery body */}
+    <svg width="32" height="48" viewBox="0 0 32 48" fill="none" style={{ shapeRendering: 'crispEdges' }}>
       <rect x="4" y="8" width="24" height="36" rx="4" ry="4" stroke="#000" strokeWidth="2" fill="none" />
-      {/* Rounded terminal/cap */}
       <rect x="11" y="2" width="10" height="6" rx="2" ry="2" stroke="#000" strokeWidth="2" fill="#000" />
-      {/* Battery fill with rounded bottom */}
       {fillHeight > 0 && (
-        <rect
-          x="6"
-          y={fillY}
-          width="20"
-          height={fillHeight}
-          rx={fillY > 36 ? 2 : 0}
-          ry={fillY > 36 ? 2 : 0}
-          fill="#000"
-        />
+        <rect x="6" y={fillY} width="20" height={fillHeight} rx={fillY > 36 ? 2 : 0} ry={fillY > 36 ? 2 : 0} fill="#000" />
       )}
     </svg>
   )
@@ -205,42 +193,49 @@ function BatteryIcon({ pct }: { pct: number }) {
 
 function GridOnIcon() {
   return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={{ shapeRendering: 'crispEdges' }}
-    >
-      {/* Solid lightning bolt - power connected */}
-      <polygon
-        points="13,2 6,14 11,14 11,22 18,10 13,10"
-        fill="#000"
-        stroke="#000"
-        strokeWidth="1"
-      />
+    <svg width="32" height="48" viewBox="0 0 24 24" fill="none" style={{ shapeRendering: 'crispEdges' }}>
+      <polygon points="13,2 6,14 11,14 11,22 18,10 13,10" fill="#000" stroke="#000" strokeWidth="1" />
     </svg>
   )
 }
 
 function GridOffIcon() {
   return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={{ shapeRendering: 'crispEdges' }}
-    >
-      {/* Outlined lightning bolt with strike-through - power disconnected */}
-      <polygon
-        points="13,2 6,14 11,14 11,22 18,10 13,10"
-        fill="none"
-        stroke="#000"
-        strokeWidth="2"
-      />
-      {/* Diagonal strike-through */}
+    <svg width="32" height="48" viewBox="0 0 24 24" fill="none" style={{ shapeRendering: 'crispEdges' }}>
+      <polygon points="13,2 6,14 11,14 11,22 18,10 13,10" fill="none" stroke="#000" strokeWidth="2" />
       <line x1="4" y1="4" x2="20" y2="20" stroke="#000" strokeWidth="2" />
+    </svg>
+  )
+}
+
+function StatusIcon({ status }: { status: 'discharging' | 'charging' | 'idle' | 'unknown' }) {
+  return (
+    <svg width="32" height="48" viewBox="0 0 24 24" fill="none" style={{ shapeRendering: 'crispEdges' }}>
+      {status === 'discharging' && (
+        <>
+          <line x1="12" y1="4" x2="12" y2="18" stroke="#000" strokeWidth="2" />
+          <polyline points="6,12 12,20 18,12" fill="none" stroke="#000" strokeWidth="2" />
+        </>
+      )}
+      {status === 'charging' && (
+        <>
+          <line x1="12" y1="6" x2="12" y2="20" stroke="#000" strokeWidth="2" />
+          <polyline points="6,12 12,4 18,12" fill="none" stroke="#000" strokeWidth="2" />
+        </>
+      )}
+      {(status === 'idle' || status === 'unknown') && (
+        <polyline points="5,12 10,18 19,6" fill="none" stroke="#000" strokeWidth="2" />
+      )}
+    </svg>
+  )
+}
+
+function LoadIcon() {
+  return (
+    <svg width="32" height="48" viewBox="0 0 24 24" fill="none" style={{ shapeRendering: 'crispEdges' }}>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="#000" strokeWidth="2" />
+      <line x1="12" y1="12" x2="17" y2="7" stroke="#000" strokeWidth="2" />
+      <circle cx="12" cy="12" r="2" fill="#000" />
     </svg>
   )
 }
@@ -415,6 +410,51 @@ function BatteryGraph({ history }: { history: { time: string; percent: number }[
   )
 }
 
+// =============================================================================
+// Runtime Formatting Helpers
+// =============================================================================
+
+/**
+ * Format runtime minutes as human-readable string.
+ * Examples: "~2h 30m", "~45m", "~8h"
+ */
+function formatRuntime(minutes: number | null): string {
+  if (minutes === null) return '--'
+
+  if (minutes < 60) {
+    return `~${minutes}m`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+
+  if (remainingMinutes === 0) {
+    return `~${hours}h`
+  }
+
+  return `~${hours}h ${remainingMinutes}m`
+}
+
+/**
+ * Format power in watts with appropriate unit.
+ * Examples: "850W", "1.2kW"
+ */
+function formatPower(watts: number | null): string {
+  if (watts === null) return '--'
+
+  const absWatts = Math.abs(watts)
+  if (absWatts >= 1000) {
+    return `${(absWatts / 1000).toFixed(1)}kW`
+  }
+
+  return `${Math.round(absWatts)}W`
+}
+
+
+// =============================================================================
+// Outage Components
+// =============================================================================
+
 function OutageTile({
   hour,
   fraction,
@@ -546,7 +586,14 @@ export default async function PanelPage() {
   const currentIcon = weatherData ? weatherCodeToIcon(weatherData.weatherCode) : 'cloudy'
   const currentCondition = weatherData ? describeWeather(weatherData.weatherCode) : 'No data'
   const currentTemp = weatherData ? Math.round(weatherData.temperature) : '--'
-  const hourlyForecast = weatherData?.hourly?.slice(0, 6) || []
+  const currentHumidity = weatherData?.humidity ?? null
+
+  // Filter hourly forecast to show only future hours (not past)
+  const now = new Date()
+  const hourlyForecast = weatherData?.hourly?.filter((h) => {
+    const forecastTime = new Date(h.time)
+    return forecastTime.getTime() > now.getTime()
+  }).slice(0, 6) || []
 
   return (
     <div className="panel-container">
@@ -562,9 +609,11 @@ export default async function PanelPage() {
           </div>
           <div className="weather-temp">{currentTemp}°</div>
           <div className="weather-condition">{currentCondition}</div>
+          {currentHumidity !== null && (
+            <div className="weather-humidity">Humidity: {currentHumidity}%</div>
+          )}
         </div>
 
-        <div className="weather-hourly-title">Hourly Forecast</div>
         <div className="weather-hourly">
           {hourlyForecast.length > 0 ? (
             hourlyForecast.map((h, i) => (
@@ -609,13 +658,25 @@ export default async function PanelPage() {
             </span>
           </div>
           <div className="backup-header">
-            <div className="backup-battery">
+            <div className="backup-item">
               <BatteryIcon pct={backup.batteryPercent} />
-              <span className="battery-pct">{backup.batteryPercent}%</span>
+              <span className="backup-value-lg">{backup.batteryPercent}%</span>
             </div>
-            <div className="backup-grid">
+            <div className="backup-item">
               {backup.gridConnected ? <GridOnIcon /> : <GridOffIcon />}
-              <span>Grid: {backup.gridConnected ? 'Connected' : 'Disconnected'}</span>
+              <span className="backup-value-lg">{backup.gridConnected ? 'ON' : 'OFF'}</span>
+            </div>
+            <div className="backup-item">
+              <StatusIcon status={backup.chargingStatus} />
+              <span className="backup-value-lg">
+                {backup.chargingStatus === 'discharging'
+                  ? (backup.estimatedRuntimeMinutes ? formatRuntime(backup.estimatedRuntimeMinutes) : 'Drain')
+                  : backup.chargingStatus === 'charging' ? 'Charge' : 'Idle'}
+              </span>
+            </div>
+            <div className="backup-item">
+              <LoadIcon />
+              <span className="backup-value-lg">{formatPower(backup.loadPowerWatts)}</span>
             </div>
           </div>
           <div className="backup-graph">

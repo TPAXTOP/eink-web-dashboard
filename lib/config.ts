@@ -121,6 +121,12 @@ export const deyeConfig = {
    * Device serial number to monitor.
    */
   deviceSn: process.env.DEYE_DEVICE_SN || '',
+
+  /**
+   * Battery capacity in Wh for runtime calculation.
+   * Default: 5120 Wh (100Ah * 51.2V LiFePO4)
+   */
+  batteryCapacityWh: parseInt(process.env.DEYE_BATTERY_CAPACITY_WH || '5120', 10),
 }
 
 /**
