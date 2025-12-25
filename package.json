@@ -1,5 +1,5 @@
 {
-  "name": "epaper-dashboard",
+  "name": "eink-web-dashboard",
   "version": "2.0.0",
   "description": "E-paper dashboard for weather and FX rates",
   "private": true,

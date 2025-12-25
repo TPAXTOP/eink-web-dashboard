@@ -131,7 +131,7 @@ This section documents the core architectural patterns for the Next.js applicati
 | `lib/weather-codes.ts` | Weather code descriptions |
 | `lib/format-utils.ts` | Value formatting utilities |
 | `app/page.tsx` | Main dashboard page |
-| `app/panel/page.tsx` | E-paper panel page (800x480) |
+| `app/power/page.tsx` | E-paper power page (800x480) |
 | `app/about/page.tsx` | About page |
 | `app/api/*/route.ts` | API route handlers |
 | `app/components/` | Reusable UI components |

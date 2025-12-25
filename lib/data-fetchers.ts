@@ -419,7 +419,7 @@ export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
 }
 
 /**
- * Get hourly outage fractions for display in the panel.
+ * Get hourly outage fractions for display in the power page.
  * Converts slot-based schedule to 24-hour fractions.
  * Also returns whether the schedule applies (is confirmed) for each day.
  */

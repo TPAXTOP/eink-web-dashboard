@@ -1,5 +1,5 @@
 /**
- * E-Paper Panel Page - Server Component
+ * E-Paper Power Page - Server Component
  * Optimized for 800x480 monochrome e-paper display.
  * Uses inline SVG icons and static rendering only.
  */
@@ -9,7 +9,7 @@ import { fetchWeather, fetchOutageSchedule, getHourlyOutages } from '@/lib/data-
 import { fetchBackupPower } from '@/lib/deye-api'
 import { describeWeather } from '@/lib/weather-codes'
 import { formatKyivDateTimeForDisplay, extractKyivHour } from '@/lib/time-utils'
-import './panel.css'
+import './power.css'
 
 // Revalidate every 15 minutes (matches outage schedule refresh)
 export const revalidate = 900

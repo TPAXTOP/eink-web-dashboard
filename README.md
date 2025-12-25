@@ -59,7 +59,7 @@ npm start
 │   │   ├── cache-status/  # Cache diagnostics
 │   │   └── healthz/       # Health check
 │   ├── components/        # React components
-│   ├── panel/             # E-paper panel page
+│   ├── power/             # E-paper power page
 │   ├── about/             # About page
 │   ├── globals.css        # Global styles
 │   ├── layout.tsx         # Root layout
@@ -80,7 +80,7 @@ npm start
 | Route | Description |
 |-------|-------------|
 | `/` | Main dashboard with weather and FX rates |
-| `/panel` | E-paper optimized panel (800x480) |
+| `/power` | E-paper optimized power page (800x480) |
 | `/about` | About page |
 
 ## API Endpoints

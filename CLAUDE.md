@@ -42,7 +42,7 @@ Request → Server Component → fetchDashboardData() (lib/data-fetchers.ts)
 
 ### Routes
 - `/` - Main dashboard (weather + FX rates)
-- `/panel` - E-paper optimized 800x480 view
+- `/power` - E-paper optimized 800x480 view
 - `/api/weather` - Weather data endpoint
 - `/api/fx` - Exchange rates endpoint
 - `/api/healthz` - Health check
