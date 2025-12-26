@@ -1,15 +1,39 @@
 /**
- * FX Chart component - Renders SVG chart for exchange rate data.
- * E-paper compatible: monochrome, no animations.
+ * Exchange rate chart component for e-paper display.
+ *
+ * Renders an SVG line chart of historical FX data points.
+ * Optimized for monochrome e-paper: uses only black strokes, no animations.
+ *
+ * @module FxChart
  */
 
 import type { FxPoint } from '@/lib/types'
 import { formatRate } from '@/lib/format-utils'
 
+/**
+ * Props for the FxChart component.
+ */
 interface FxChartProps {
+  /** Array of FX data points with date and value */
   points: FxPoint[]
 }
 
+/**
+ * Renders an SVG line chart of exchange rate history.
+ *
+ * Features:
+ * - Auto-scaling Y-axis based on data range
+ * - Grid lines at min, mid, and max values
+ * - X-axis date labels at regular intervals
+ * - Individual data point markers
+ *
+ * @param props - Component props
+ * @param props.points - Array of FX data points to display
+ * @returns SVG element with chart visualization
+ *
+ * @example
+ * <FxChart points={[{ date: '2025-12-25', value: 41.55 }, ...]} />
+ */
 export function FxChart({ points }: FxChartProps) {
   if (!points.length) {
     return (
@@ -79,12 +103,12 @@ export function FxChart({ points }: FxChartProps) {
         />
       ))}
 
-      {/* X-axis labels */}
+      {/* X-axis labels - track index during filter to avoid O(n) indexOf lookup */}
       {points
-        .filter((_, i) => i % labelInterval === 0 || i === points.length - 1)
-        .map((p) => {
-          const originalIndex = points.indexOf(p)
-          const x = scaleX(originalIndex)
+        .map((p, i) => ({ point: p, index: i }))
+        .filter(({ index }) => index % labelInterval === 0 || index === points.length - 1)
+        .map(({ point: p, index }) => {
+          const x = scaleX(index)
           const label = p.date.slice(5) // MM-DD format
           return (
             <text

@@ -1,3 +1,16 @@
+/**
+ * Time formatting utilities for Kyiv timezone.
+ *
+ * All functions in this module format dates/times in the Europe/Kyiv timezone.
+ * This ensures consistent display across server and client regardless of deployment location.
+ *
+ * @module time-utils
+ */
+
+/**
+ * IANA timezone identifier for Kyiv, Ukraine.
+ * Used for all date/time formatting in the application.
+ */
 export const KYIV_TIMEZONE = 'Europe/Kyiv'
 
 const createFormatter = (options: Intl.DateTimeFormatOptions) =>
@@ -65,6 +78,16 @@ const ensureDateOrNow = (value?: string | number | Date): Date => {
 
 const stripCommas = (value: string): string => value.replace(/,/g, '')
 
+/**
+ * Format a date/time value as time only (HH:MM) in Kyiv timezone.
+ *
+ * @param value - Date value as string, number (timestamp), or Date object
+ * @returns Formatted time string (e.g., "14:30") or "--" if invalid
+ *
+ * @example
+ * formatKyivTime('2025-12-26T12:30:00Z') // "14:30" (Kyiv is UTC+2 in winter)
+ * formatKyivTime(new Date()) // Current time in Kyiv
+ */
 export const formatKyivTime = (value: string | number | Date): string => {
   const date = parseDate(value)
   if (!date) {
@@ -95,6 +118,15 @@ export const formatKyivTimeFromLocalString = (isoString: string | undefined): st
   return formatKyivTime(isoString)
 }
 
+/**
+ * Format a date/time value for user-facing display (DD/MM/YYYY HH:MM) in Kyiv timezone.
+ *
+ * @param value - Date value as string, number (timestamp), or Date object
+ * @returns Formatted date-time string (e.g., "26/12/2025 14:30") or "--" if invalid
+ *
+ * @example
+ * formatKyivDateTimeForDisplay('2025-12-26T12:30:00Z') // "26/12/2025 14:30"
+ */
 export const formatKyivDateTimeForDisplay = (value: string | number | Date): string => {
   const date = parseDate(value)
   if (!date) {
@@ -103,6 +135,17 @@ export const formatKyivDateTimeForDisplay = (value: string | number | Date): str
   return stripCommas(dateTimeFormatter.format(date))
 }
 
+/**
+ * Format a date/time value for log output (DD/MM/YYYY HH:MM:SS) in Kyiv timezone.
+ * Includes seconds for precise logging. Defaults to current time if no value provided.
+ *
+ * @param value - Optional date value. If undefined, uses current time.
+ * @returns Formatted date-time string with seconds (e.g., "26/12/2025 14:30:45")
+ *
+ * @example
+ * formatKyivDateTimeForLog() // Current time: "26/12/2025 14:30:45"
+ * formatKyivDateTimeForLog('2025-12-26T12:30:00Z') // "26/12/2025 14:30:00"
+ */
 export const formatKyivDateTimeForLog = (value?: string | number | Date): string => {
   const date = ensureDateOrNow(value)
   return stripCommas(logFormatter.format(date))
@@ -144,7 +187,12 @@ export const formatShortDateTime = (value: string | undefined): string => {
 
 /**
  * Extract hour (HH) from ISO timestamp in Kyiv timezone.
- * Returns two-digit hour string like "00", "06", "12", "18".
+ *
+ * @param isoString - ISO 8601 timestamp string
+ * @returns Two-digit hour string (e.g., "00", "06", "12", "18") or "--" if invalid
+ *
+ * @example
+ * extractKyivHour('2025-12-26T12:30:00Z') // "14" (Kyiv is UTC+2)
  */
 export const extractKyivHour = (isoString: string): string => {
   const date = parseDate(isoString)

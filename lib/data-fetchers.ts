@@ -18,25 +18,9 @@
  * revalidate, only successful HTTP responses are cached.
  */
 
-import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, loggingConfig } from './config'
-import { formatKyivDateTimeForLog } from './time-utils'
+import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, apiConfig } from './config'
+import { logInfo, logError, logWarn, logDebug } from './logger'
 import type { WeatherData, FxData, FxPoint, HourlyForecast, OutageSchedule, OutageSlot, HourlyOutage } from './types'
-
-// =============================================================================
-// Diagnostic Logging
-// =============================================================================
-
-const getTimestamp = () => formatKyivDateTimeForLog()
-
-const log = (tag: string, ...args: unknown[]) => {
-  if (loggingConfig.verbose) {
-    console.log(`[${tag}]`, getTimestamp(), ...args)
-  }
-}
-
-const logImportant = (tag: string, ...args: unknown[]) => {
-  console.log(`[${tag}]`, getTimestamp(), ...args)
-}
 
 // =============================================================================
 // Weather Fetcher
@@ -50,7 +34,7 @@ const buildWeatherUrl = (): string => {
   url.searchParams.set('longitude', String(weatherConfig.longitude))
   url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code')
   url.searchParams.set('hourly', 'temperature_2m,weather_code')
-  url.searchParams.set('forecast_hours', '8')
+  url.searchParams.set('forecast_hours', String(apiConfig.forecastHours))
   url.searchParams.set('timezone', weatherConfig.timezone)
   return url.toString()
 }
@@ -61,7 +45,7 @@ const buildWeatherUrl = (): string => {
  * Only successful responses are cached; errors are not cached.
  */
 export const fetchWeather = async (): Promise<WeatherData | null> => {
-  logImportant('weather', '→ Fetching weather data from external API')
+  logInfo('weather', 'Fetching weather data')
 
   try {
     // Use next.revalidate for HTTP-level caching (only caches successful responses)
@@ -102,7 +86,7 @@ export const fetchWeather = async (): Promise<WeatherData | null> => {
       hourly,
     }
 
-    logImportant('weather', '✓ Weather data fetched from external API', {
+    logInfo('weather', 'Weather data fetched', {
       temp: data.temperature,
       code: data.weatherCode,
       hourlyPoints: hourly.length,
@@ -111,7 +95,7 @@ export const fetchWeather = async (): Promise<WeatherData | null> => {
     return data
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('weather', '✗ Failed to fetch weather:', message)
+    logError('weather', 'Failed to fetch weather:', message)
     return null
   }
 }
@@ -216,11 +200,11 @@ export const fetchFx = async (): Promise<FxData | null> => {
   const apiKey = process.env.EXCHANGERATE_API_KEY
 
   if (!apiKey) {
-    logImportant('fx', '⚠ Missing EXCHANGERATE_API_KEY env - skipping FX fetch')
+    logWarn('fx', 'Missing EXCHANGERATE_API_KEY env, skipping FX fetch')
     return null
   }
 
-  logImportant('fx', '→ Fetching FX data from external API')
+  logInfo('fx', 'Fetching FX data')
 
   try {
     const end = new Date()
@@ -228,7 +212,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
     start.setDate(end.getDate() - fxConfig.historyDays)
 
     const requestUrl = buildFxUrl(toIsoDate(start), toIsoDate(end), apiKey)
-    log('fx', 'Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
+    logDebug('fx', 'Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
 
     // Use next.revalidate for HTTP-level caching (only caches successful responses)
     const response = await fetch(requestUrl, {
@@ -237,7 +221,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
 
     if (!response.ok) {
       const text = await response.text()
-      log('fx', 'Upstream error response', { status: response.status, body: text.slice(0, 200) })
+      logDebug('fx', 'Upstream error response', { status: response.status, body: text.slice(0, 200) })
       throw new Error(`FX upstream responded with ${response.status}`)
     }
 
@@ -263,7 +247,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
       updatedAt,
     }
 
-    logImportant('fx', '✓ FX data fetched from external API', {
+    logInfo('fx', 'FX data fetched', {
       points: points.length,
       latest: latest?.value,
       fetchedAt: data.fetchedAt,
@@ -271,7 +255,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
     return data
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('fx', '✗ Failed to fetch FX:', message)
+    logError('fx', 'Failed to fetch FX:', message)
     return null
   }
 }
@@ -381,7 +365,7 @@ function parseYasnoResponse(
  * Returns schedule for the configured group ID.
  */
 export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
-  logImportant('outage', '→ Fetching outage schedule from Yasno API')
+  logInfo('outage', 'Fetching outage schedule')
 
   try {
     const response = await fetch(outageConfig.apiUrl, {
@@ -403,7 +387,7 @@ export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
       fetchedAt: new Date().toISOString(),
     }
 
-    logImportant('outage', '✓ Outage schedule fetched', {
+    logInfo('outage', 'Outage schedule fetched', {
       groupId: data.groupId,
       todaySlots: today?.slots.length || 0,
       tomorrowSlots: tomorrow?.slots.length || 0,
@@ -413,7 +397,7 @@ export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
     return data
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('outage', '✗ Failed to fetch outage schedule:', message)
+    logError('outage', 'Failed to fetch outage schedule:', message)
     return null
   }
 }

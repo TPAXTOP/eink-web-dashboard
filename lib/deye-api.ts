@@ -6,19 +6,9 @@
  */
 
 import { createHash } from 'crypto'
-import { deyeConfig, dataFetchConfig } from './config'
-import { formatKyivDateTimeForLog } from './time-utils'
+import { deyeConfig, dataFetchConfig, apiConfig } from './config'
+import { logInfo, logError, logWarn, logDebug } from './logger'
 import type { BackupPowerData, BatteryHistoryPoint, ChargingStatus } from './types'
-
-// =============================================================================
-// Logging
-// =============================================================================
-
-const getTimestamp = () => formatKyivDateTimeForLog()
-
-const logImportant = (tag: string, ...args: unknown[]) => {
-  console.log(`[${tag}]`, getTimestamp(), ...args)
-}
 
 // =============================================================================
 // Authentication
@@ -50,11 +40,11 @@ async function getAccessToken(): Promise<string | null> {
 
   // Validate config
   if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || (!deyeConfig.password && !deyeConfig.hashedPassword)) {
-    logImportant('deye', '⚠ Missing Deye credentials (DEYE_APP_ID, DEYE_APP_SECRET, DEYE_EMAIL, DEYE_PASSWORD or DEYE_HASHED_PASSWORD)')
+    logWarn('deye', 'Missing Deye credentials (DEYE_APP_ID, DEYE_APP_SECRET, DEYE_EMAIL, DEYE_PASSWORD or DEYE_HASHED_PASSWORD)')
     return null
   }
 
-  logImportant('deye', '→ Authenticating with Deye Cloud API')
+  logInfo('deye', 'Authenticating with Deye Cloud API')
 
   try {
     const url = `${deyeConfig.apiUrl}/v1.0/account/token?appId=${encodeURIComponent(deyeConfig.appId)}`
@@ -96,11 +86,11 @@ async function getAccessToken(): Promise<string | null> {
       expiresAt: Date.now() + (expiresIn || 3600) * 1000,
     }
 
-    logImportant('deye', '✓ Authentication successful')
+    logInfo('deye', 'Authentication successful')
     return accessToken
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('deye', '✗ Authentication failed:', message)
+    logError('deye', 'Authentication failed:', message)
     cachedToken = null
     return null
   }
@@ -163,8 +153,8 @@ function calculateRuntimeMinutes(
  */
 function getChargingStatus(batteryPowerWatts: number | null): ChargingStatus {
   if (batteryPowerWatts === null) return 'unknown'
-  if (batteryPowerWatts > 50) return 'discharging' // >50W threshold to avoid noise
-  if (batteryPowerWatts < -50) return 'charging' // <-50W threshold
+  if (batteryPowerWatts > apiConfig.batteryPowerThresholdWatts) return 'discharging'
+  if (batteryPowerWatts < -apiConfig.batteryPowerThresholdWatts) return 'charging'
   return 'idle'
 }
 
@@ -198,7 +188,7 @@ async function fetchDeviceLatest(token: string): Promise<{
   loadPowerWatts: number | null
 } | null> {
   if (!deyeConfig.deviceSn) {
-    logImportant('deye', '⚠ Missing DEYE_DEVICE_SN')
+    logWarn('deye', 'Missing DEYE_DEVICE_SN')
     return null
   }
 
@@ -224,11 +214,11 @@ async function fetchDeviceLatest(token: string): Promise<{
     const data: DeviceLatestResponse = await response.json()
 
     if (!data.success || data.code !== '1000000') {
-      logImportant('deye', '✗ Device latest API error:', data.code, data.msg)
+      logError('deye', 'Device latest API error:', data.code, data.msg)
       throw new Error(data.msg || 'Failed to get device data')
     }
 
-    logImportant('deye', '→ Device latest response received, devices:', data.deviceDataList?.length || 0)
+    logDebug('deye', 'Device latest response received, devices:', data.deviceDataList?.length || 0)
 
     const deviceData = data.deviceDataList?.[0]
     if (!deviceData) {
@@ -273,7 +263,7 @@ async function fetchDeviceLatest(token: string): Promise<{
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('deye', '✗ Failed to fetch device latest:', message)
+    logError('deye', 'Failed to fetch device latest:', message)
     return null
   }
 }
@@ -316,11 +306,11 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
     const data = await response.json()
 
     if (!data.success || data.code !== '1000000') {
-      logImportant('deye', '✗ Device history API error:', data.code, data.msg)
+      logError('deye', 'Device history API error:', data.code, data.msg)
       throw new Error(data.msg || 'Failed to get device history')
     }
 
-    logImportant('deye', '→ Device history response received, data points:', data.dataList?.length || 0)
+    logDebug('deye', 'Device history response received, data points:', data.dataList?.length || 0)
 
     // Parse history data - response has dataList with time and itemList
     const points: BatteryHistoryPoint[] = []
@@ -344,14 +334,11 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
     // Sort by time chronologically (oldest first)
     points.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
 
-    // Target 96 points for 15-minute granularity over 24 hours
-    const TARGET_HISTORY_POINTS = 96
-
     // Downsample evenly if we have more points, ensuring the most recent point is always included
-    if (points.length > TARGET_HISTORY_POINTS) {
-      const step = (points.length - 1) / (TARGET_HISTORY_POINTS - 1)
+    if (points.length > apiConfig.targetHistoryPoints) {
+      const step = (points.length - 1) / (apiConfig.targetHistoryPoints - 1)
       const sampled: BatteryHistoryPoint[] = []
-      for (let i = 0; i < TARGET_HISTORY_POINTS; i++) {
+      for (let i = 0; i < apiConfig.targetHistoryPoints; i++) {
         sampled.push(points[Math.round(i * step)])
       }
       return sampled
@@ -360,7 +347,7 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
     return points
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('deye', '✗ Failed to fetch device history:', message)
+    logError('deye', 'Failed to fetch device history:', message)
     return []
   }
 }
@@ -373,11 +360,11 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
  * Fetch complete backup power data including current status and 24h history.
  */
 export async function fetchBackupPower(): Promise<BackupPowerData | null> {
-  logImportant('deye', '→ Fetching backup power data')
+  logInfo('deye', 'Fetching backup power data')
 
   // Check if Deye is configured
   if (!deyeConfig.appId || !deyeConfig.appSecret || !deyeConfig.email || (!deyeConfig.password && !deyeConfig.hashedPassword) || !deyeConfig.deviceSn) {
-    logImportant('deye', '⚠ Deye not configured - using mock data')
+    logWarn('deye', 'Deye not configured, using mock data')
     return null
   }
 
@@ -417,7 +404,7 @@ export async function fetchBackupPower(): Promise<BackupPowerData | null> {
       chargingStatus,
     }
 
-    logImportant('deye', '✓ Backup power data fetched', {
+    logInfo('deye', 'Backup power data fetched', {
       battery: data.batteryPercent,
       grid: data.gridConnected,
       historyPoints: history.length,
@@ -430,7 +417,7 @@ export async function fetchBackupPower(): Promise<BackupPowerData | null> {
     return data
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    logImportant('deye', '✗ Failed to fetch backup power:', message)
+    logError('deye', 'Failed to fetch backup power:', message)
     return null
   }
 }

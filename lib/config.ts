@@ -40,9 +40,9 @@ export const dataFetchConfig = {
 
   /**
    * Battery history refresh interval.
-   * Historical data doesn't change frequently, 30 minutes is sufficient.
+   * Historical data doesn't change frequently, 5 minutes is sufficient.
    */
-  backupHistoryRevalidateSeconds: 5 * 60, // 30 minutes
+  backupHistoryRevalidateSeconds: 5 * 60, // 5 minutes
 }
 
 /**
@@ -139,5 +139,29 @@ export const loggingConfig = {
    * Set to false in production to reduce noise.
    */
   verbose: process.env.NODE_ENV !== 'production',
+}
+
+/**
+ * API request configuration constants.
+ * These values control API request parameters and processing thresholds.
+ */
+export const apiConfig = {
+  /**
+   * Number of hours of hourly forecast to fetch from Open-Meteo.
+   * 8 hours provides enough data for the hourly forecast display.
+   */
+  forecastHours: 8,
+
+  /**
+   * Target number of battery history points for 24h display.
+   * 96 points = 15-minute intervals over 24 hours.
+   */
+  targetHistoryPoints: 96,
+
+  /**
+   * Battery power threshold in watts to distinguish charging/discharging from idle.
+   * Values between -threshold and +threshold are considered idle.
+   */
+  batteryPowerThresholdWatts: 50,
 }
 
