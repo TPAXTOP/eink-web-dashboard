@@ -62,9 +62,10 @@ export function OutageTile({
   if (isFullOutage) {
     textColor = '#fff'
   } else if (isPartial) {
-    // Position text in the white area for contrast
+    // Position text based on which half is affected
     if (halfAffected === 'first') {
-      textX = tileWidth * 0.7 // Right side (white area)
+      textX = tileWidth * 0.3 // Left side (dark area)
+      textColor = '#fff' // White text for contrast on dark
     } else if (halfAffected === 'second') {
       textX = tileWidth * 0.3 // Left side (white area)
     }
