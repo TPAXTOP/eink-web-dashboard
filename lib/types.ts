@@ -99,8 +99,8 @@ export type OutageSlot = {
 export type OutageDay = {
   /** Date in YYYY-MM-DD format */
   date: string
-  /** Schedule status: 'ScheduleApplies' when confirmed */
-  status: 'ScheduleApplies' | 'WaitingForSchedule' | string
+  /** Schedule status: 'ScheduleApplies' when confirmed, 'EmergencyShutdowns' for emergencies */
+  status: 'ScheduleApplies' | 'WaitingForSchedule' | 'EmergencyShutdowns' | string
   /** List of outage time slots */
   slots: OutageSlot[]
 }

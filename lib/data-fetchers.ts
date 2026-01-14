@@ -317,6 +317,28 @@ function slotsToHourlyFractions(slots: OutageSlot[]): HourlyOutage[] {
 }
 
 /**
+ * Generate alternating half-hour pattern for EmergencyShutdowns status.
+ * Creates a "zebra" pattern with alternating grey diagonal halves.
+ *
+ * @param startWithFirst - If true, hour 0 shows first half (left diagonal);
+ *                         if false, hour 0 shows second half (right diagonal)
+ */
+function generateAlternatingPattern(startWithFirst: boolean): HourlyOutage[] {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const isEvenHour = hour % 2 === 0
+    const halfAffected: 'first' | 'second' = startWithFirst
+      ? (isEvenHour ? 'first' : 'second')
+      : (isEvenHour ? 'second' : 'first')
+
+    return {
+      hour: hour.toString().padStart(2, '0'),
+      fraction: 0.5,
+      halfAffected,
+    }
+  })
+}
+
+/**
  * Parse Yasno API response for a specific group.
  */
 function parseYasnoResponse(
@@ -424,13 +446,35 @@ export const getHourlyOutages = (schedule: OutageSchedule | null): {
     }
   }
 
+  // Check for EmergencyShutdowns with no slots - show alternating pattern
+  const isEmergencyNoSlots = (day: OutageSchedule['today']) =>
+    day?.status === 'EmergencyShutdowns' && day.slots.length === 0
+
+  // Determine hours for each day:
+  // - EmergencyShutdowns with no slots: alternating pattern (today starts left, tomorrow starts right)
+  // - Normal case: convert slots to hourly fractions
+  // - No schedule: empty day
+  const getTodayHours = (): HourlyOutage[] => {
+    if (isEmergencyNoSlots(schedule.today)) {
+      return generateAlternatingPattern(true) // Today starts with left half
+    }
+    return schedule.today ? slotsToHourlyFractions(schedule.today.slots) : emptyDay
+  }
+
+  const getTomorrowHours = (): HourlyOutage[] => {
+    if (isEmergencyNoSlots(schedule.tomorrow)) {
+      return generateAlternatingPattern(false) // Tomorrow starts with right half
+    }
+    return schedule.tomorrow ? slotsToHourlyFractions(schedule.tomorrow.slots) : emptyDay
+  }
+
   return {
     today: {
-      hours: schedule.today ? slotsToHourlyFractions(schedule.today.slots) : emptyDay,
+      hours: getTodayHours(),
       scheduleApplies: schedule.today?.status === 'ScheduleApplies',
     },
     tomorrow: {
-      hours: schedule.tomorrow ? slotsToHourlyFractions(schedule.tomorrow.slots) : emptyDay,
+      hours: getTomorrowHours(),
       scheduleApplies: schedule.tomorrow?.status === 'ScheduleApplies',
     },
   }
