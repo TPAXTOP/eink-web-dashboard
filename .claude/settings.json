@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "serena@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -NoProfile -Command \"$input = $input | ConvertFrom-Json; $total = $input.context_window.total_input_tokens + $input.context_window.total_output_tokens; Write-Host \"Tokens: $total | Limit resets: Check claude.ai/account\" -NoNewline\""
   }
 }
