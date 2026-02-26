@@ -28,9 +28,9 @@ export const dataFetchConfig = {
 
   /**
    * Power outage schedule refresh interval.
-   * Schedules are usually published daily, 15 minutes is sufficient.
+   * Schedules are usually published daily, 5 minutes is sufficient.
    */
-  outageRevalidateSeconds: 15 * 60, // 15 minutes
+  outageRevalidateSeconds: 5 * 60, // 5 minutes
 
   /**
    * Backup power (battery) status refresh interval.
