@@ -20,7 +20,9 @@
 
 import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, apiConfig } from './config'
 import { logInfo, logError, logWarn, logDebug } from './logger'
-import type { WeatherData, FxData, FxPoint, HourlyForecast, OutageSchedule, OutageSlot, HourlyOutage } from './types'
+import { withLastKnownGood, type Resilient } from './last-known-good'
+import { fetchBackupPower } from './deye-api'
+import type { WeatherData, FxData, FxPoint, HourlyForecast, OutageSchedule, OutageSlot, HourlyOutage, BackupPowerData } from './types'
 
 // =============================================================================
 // Weather Fetcher
@@ -485,17 +487,38 @@ export const getHourlyOutages = (schedule: OutageSchedule | null): {
 // =============================================================================
 
 export type DashboardData = {
-  weather: WeatherData | null
-  fx: FxData | null
+  weather: Resilient<WeatherData>
+  fx: Resilient<FxData>
   fetchedAt: string
 }
+
+// =============================================================================
+// Resilient Getters (last-known-good fallback)
+// =============================================================================
+
+/**
+ * Resilient wrappers around the raw fetchers. On a failed refresh, these return
+ * the previous successful result marked `stale` instead of null, so the UI can
+ * keep showing the last reading with a "not updated" indicator.
+ */
+export const getWeather = (): Promise<Resilient<WeatherData>> =>
+  withLastKnownGood('weather', fetchWeather)
+
+export const getFx = (): Promise<Resilient<FxData>> =>
+  withLastKnownGood('fx', fetchFx)
+
+export const getOutageSchedule = (): Promise<Resilient<OutageSchedule>> =>
+  withLastKnownGood('outage', fetchOutageSchedule)
+
+export const getBackupPower = (): Promise<Resilient<BackupPowerData>> =>
+  withLastKnownGood('backup', fetchBackupPower)
 
 /**
  * Fetch all dashboard data in parallel.
  * Used by server components to get all data in one call.
  */
 export const fetchDashboardData = async (): Promise<DashboardData> => {
-  const [weather, fx] = await Promise.all([fetchWeather(), fetchFx()])
+  const [weather, fx] = await Promise.all([getWeather(), getFx()])
 
   return {
     weather,
