@@ -8,8 +8,8 @@
  */
 
 import type { Metadata, Viewport } from 'next'
-import { fetchWeather, fetchOutageSchedule, getHourlyOutages } from '@/lib/data-fetchers'
-import { fetchBackupPower } from '@/lib/deye-api'
+import { getWeather, getOutageSchedule, getBackupPower, getHourlyOutages } from '@/lib/data-fetchers'
+import { StaleBadge } from '@/app/components/StaleBadge'
 import { describeWeather } from '@/lib/weather-codes'
 import { formatKyivDateTimeForDisplay } from '@/lib/time-utils'
 import { weatherCodeToIcon, formatHourlyTime } from '@/lib/weather-helpers'
@@ -26,8 +26,12 @@ import { BatteryGraph } from '@/app/components/BatteryGraph'
 import { OutageRow } from '@/app/components/OutageDisplay'
 import './power.css'
 
-/** Revalidate every 15 minutes (matches outage schedule refresh) */
-export const revalidate = 900
+/**
+ * Render dynamically on every request so each device refresh re-attempts the
+ * upstream fetches. Per-fetch `next: { revalidate }` still caps how often the
+ * external APIs are actually hit, so this does not hammer them.
+ */
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'E-Paper Dashboard',
@@ -74,18 +78,23 @@ const mockBackup = {
  * - Backup power status with battery graph
  */
 export default async function PanelPage() {
-  // Fetch real data in parallel
-  const [weatherData, outageSchedule, backupPowerData] = await Promise.all([
-    fetchWeather(),
-    fetchOutageSchedule(),
-    fetchBackupPower(),
+  // Fetch real data in parallel (resilient: returns last-known-good on failure)
+  const [weatherResult, outageResult, backupResult] = await Promise.all([
+    getWeather(),
+    getOutageSchedule(),
+    getBackupPower(),
   ])
 
+  const weatherData = weatherResult.data
+  const weatherStale = weatherResult.stale
+  const outageStale = outageResult.stale
+  const backupStale = backupResult.stale
+
   // Convert outage schedule to hourly fractions for display
-  const outage = getHourlyOutages(outageSchedule)
+  const outage = getHourlyOutages(outageResult.data)
 
   // Use real backup data if available, otherwise fallback to mock
-  const backup = backupPowerData || mockBackup
+  const backup = backupResult.data || mockBackup
 
   // Prepare weather display data
   const currentIcon = weatherData ? weatherCodeToIcon(weatherData.weatherCode) : 'cloudy'
@@ -105,7 +114,10 @@ export default async function PanelPage() {
       {/* Weather Widget - Left Column (240px) */}
       <div className="weather-column">
         <div className="weather-header">
-          <div className="weather-city">Kyiv, Ukraine</div>
+          <div className="weather-city">
+            Kyiv, Ukraine
+            {weatherStale && <StaleBadge title="Weather not updated" />}
+          </div>
         </div>
 
         <div className="weather-current">
@@ -141,7 +153,10 @@ export default async function PanelPage() {
       <div className="right-column">
         {/* Power Outage Schedule Widget - Top */}
         <div className="outage-widget">
-          <div className="outage-title">Power outage</div>
+          <div className="outage-title">
+            Power outage
+            {outageStale && <StaleBadge title="Outage schedule not updated" />}
+          </div>
           <OutageRow
             label="Today"
             schedule={outage.today.hours}
@@ -157,7 +172,10 @@ export default async function PanelPage() {
         {/* Backup Power Supply Widget - Bottom */}
         <div className="backup-widget">
           <div className="backup-title-row">
-            <span className="backup-title">Backup power supply</span>
+            <span className="backup-title">
+              Backup power supply
+              {backupStale && <StaleBadge title="Backup power not updated" />}
+            </span>
             <span className="backup-timestamp">
               Updated: {formatKyivDateTimeForDisplay(backup.lastUpdate)}
             </span>

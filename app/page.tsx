@@ -14,6 +14,7 @@ import { fetchDashboardData } from '@/lib/data-fetchers'
 import { describeWeather } from '@/lib/weather-codes'
 import { formatRate, formatTime, formatDateTime, formatDateTimeShort } from '@/lib/format-utils'
 import { FxChart } from './components/FxChart'
+import { StaleBadge } from './components/StaleBadge'
 
 // Force dynamic rendering to ensure fresh data on each request
 // This prevents build-time failures from being cached
@@ -23,7 +24,9 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 1800
 
 export default async function DashboardPage() {
-  const { weather, fx } = await fetchDashboardData()
+  const { weather: weatherResult, fx: fxResult } = await fetchDashboardData()
+  const weather = weatherResult.data
+  const fx = fxResult.data
 
   // Weather section values
   const weatherTemp = weather ? `${Math.round(weather.temperature)} °C` : '-- °C'
@@ -34,6 +37,7 @@ export default async function DashboardPage() {
     ? `As of ${formatTime(weather.time)}`
     : 'Unavailable'
   const weatherError = !weather
+  const weatherStale = weatherResult.stale
 
   // FX section values
   const fxToday = fx ? formatRate(fx.latest?.value) : '--'
@@ -43,6 +47,7 @@ export default async function DashboardPage() {
     ? `As of ${formatDateTimeShort(fx.updatedAt)}`
     : 'Unavailable'
   const fxError = !fx
+  const fxStale = fxResult.stale
 
   // Page load timestamp (when this page was rendered)
   const pageLoadTime = new Date().toISOString()
@@ -57,7 +62,7 @@ export default async function DashboardPage() {
 
       <section className="panel panel-weather" aria-labelledby="weather-title">
         <div className="panel-header">
-          <h2 id="weather-title">Weather in Kyiv</h2>
+          <h2 id="weather-title">Weather in Kyiv{weatherStale && <StaleBadge title={`Not updated — showing data ${weatherStatus.toLowerCase()}`} />}</h2>
           <p className="panel-status">{weatherStatus}</p>
         </div>
         <div className="weather-grid">
@@ -82,7 +87,7 @@ export default async function DashboardPage() {
 
       <section className="panel panel-fx" aria-labelledby="fx-title">
         <div className="panel-header">
-          <h2 id="fx-title">USD → UAH rate (30 days)</h2>
+          <h2 id="fx-title">USD → UAH rate (30 days){fxStale && <StaleBadge title={`Not updated — showing data ${fxStatus.toLowerCase()}`} />}</h2>
           <p className="panel-status">{fxStatus}</p>
         </div>
         <div className="fx-body">
