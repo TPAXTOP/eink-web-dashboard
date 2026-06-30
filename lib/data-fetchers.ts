@@ -1,26 +1,25 @@
 /**
- * Data fetching service using Next.js built-in caching.
+ * Data fetching service.
  *
  * ARCHITECTURE (Next.js App Router):
- * - Uses fetch() with next.revalidate for HTTP-level caching
- * - Next.js handles stale-while-revalidate automatically
- * - No manual file caching needed - Next.js Data Cache handles persistence
- * - Server components call these functions directly
+ * - Raw fetchers (`fetchWeather`, `fetchFx`, ...) perform a single request with
+ *   a hard timeout and THROW on any failure. They never hang and never cache.
+ * - Resilient getters (`getWeather`, `getFx`, ...) wrap the raw fetchers with
+ *   `createResilientGetter`, which adds persistent caching + last-known-good
+ *   fallback via `unstable_cache` (see `lib/last-known-good.ts`).
+ * - Server components call the resilient getters.
  *
- * CACHING BEHAVIOR:
- * - Fresh data: Served from cache immediately
- * - Stale data: Served from cache while revalidating in background
- * - On error: Returns null (NOT cached - errors bypass cache)
- *
- * NOTE: We use fetch()'s next.revalidate option instead of unstable_cache
- * because unstable_cache caches ALL return values including null/errors,
- * which causes failed builds to cache failures indefinitely. With fetch's
- * revalidate, only successful HTTP responses are cached.
+ * WHY FETCHERS THROW: `unstable_cache` serves the previously cached value when
+ * the wrapped function throws, but caches whatever it *returns*. Throwing on
+ * failure is therefore what makes the last-known-good fallback work. A fetcher
+ * may still return `null` for a stable "not configured" state (e.g. missing
+ * API key), which is intentionally cached as-is.
  */
 
-import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, apiConfig } from './config'
+import { dataFetchConfig, weatherConfig, fxConfig, outageConfig, apiConfig, fetchTimeoutConfig, staleMaxAgeConfig } from './config'
 import { logInfo, logError, logWarn, logDebug } from './logger'
-import { withLastKnownGood, type Resilient } from './last-known-good'
+import { createResilientGetter, type Resilient } from './last-known-good'
+import { fetchWithTimeout } from './fetch-utils'
 import { fetchBackupPower } from './deye-api'
 import type { WeatherData, FxData, FxPoint, HourlyForecast, OutageSchedule, OutageSlot, HourlyOutage, BackupPowerData } from './types'
 
@@ -42,18 +41,17 @@ const buildWeatherUrl = (): string => {
 }
 
 /**
- * Fetch weather data with caching.
- * Uses fetch()'s built-in caching with revalidate option.
- * Only successful responses are cached; errors are not cached.
+ * Fetch weather data.
+ *
+ * Single request with a hard timeout. Throws on any failure so the resilient
+ * getter (`getWeather`) can serve the last-known-good value. Caching is handled
+ * by `createResilientGetter`, not here.
  */
-export const fetchWeather = async (): Promise<WeatherData | null> => {
+export const fetchWeather = async (): Promise<WeatherData> => {
   logInfo('weather', 'Fetching weather data')
 
   try {
-    // Use next.revalidate for HTTP-level caching (only caches successful responses)
-    const response = await fetch(buildWeatherUrl(), {
-      next: { revalidate: dataFetchConfig.weatherRevalidateSeconds },
-    })
+    const response = await fetchWithTimeout(buildWeatherUrl(), {}, fetchTimeoutConfig.defaultMs)
 
     if (!response.ok) {
       throw new Error(`Weather API responded with ${response.status}`)
@@ -98,7 +96,7 @@ export const fetchWeather = async (): Promise<WeatherData | null> => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('weather', 'Failed to fetch weather:', message)
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }
 
@@ -194,9 +192,11 @@ const parseFxPayload = (payload: unknown): FxPoint[] => {
 }
 
 /**
- * Fetch FX data with caching.
- * Uses fetch()'s built-in caching with revalidate option.
- * Only successful responses are cached; errors are not cached.
+ * Fetch FX data.
+ *
+ * Single request with a hard timeout. Returns `null` only when no API key is
+ * configured (a stable state); throws on any real fetch failure so the
+ * resilient getter (`getFx`) can serve the last-known-good value.
  */
 export const fetchFx = async (): Promise<FxData | null> => {
   const apiKey = process.env.EXCHANGERATE_API_KEY
@@ -216,10 +216,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
     const requestUrl = buildFxUrl(toIsoDate(start), toIsoDate(end), apiKey)
     logDebug('fx', 'Requesting rates', { start: toIsoDate(start), end: toIsoDate(end) })
 
-    // Use next.revalidate for HTTP-level caching (only caches successful responses)
-    const response = await fetch(requestUrl, {
-      next: { revalidate: dataFetchConfig.fxRevalidateSeconds },
-    })
+    const response = await fetchWithTimeout(requestUrl, {}, fetchTimeoutConfig.defaultMs)
 
     if (!response.ok) {
       const text = await response.text()
@@ -258,7 +255,7 @@ export const fetchFx = async (): Promise<FxData | null> => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('fx', 'Failed to fetch FX:', message)
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }
 
@@ -386,15 +383,15 @@ function parseYasnoResponse(
 
 /**
  * Fetch power outage schedule from Yasno API.
- * Returns schedule for the configured group ID.
+ *
+ * Single request with a hard timeout. Throws on any failure so the resilient
+ * getter (`getOutageSchedule`) can serve the last-known-good value.
  */
-export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
+export const fetchOutageSchedule = async (): Promise<OutageSchedule> => {
   logInfo('outage', 'Fetching outage schedule')
 
   try {
-    const response = await fetch(outageConfig.apiUrl, {
-      next: { revalidate: dataFetchConfig.outageRevalidateSeconds },
-    })
+    const response = await fetchWithTimeout(outageConfig.apiUrl, {}, fetchTimeoutConfig.defaultMs)
 
     if (!response.ok) {
       throw new Error(`Yasno API responded with ${response.status}`)
@@ -422,7 +419,7 @@ export const fetchOutageSchedule = async (): Promise<OutageSchedule | null> => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('outage', 'Failed to fetch outage schedule:', message)
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }
 
@@ -497,21 +494,32 @@ export type DashboardData = {
 // =============================================================================
 
 /**
- * Resilient wrappers around the raw fetchers. On a failed refresh, these return
- * the previous successful result marked `stale` instead of null, so the UI can
- * keep showing the last reading with a "not updated" indicator.
+ * Resilient wrappers around the raw fetchers. Each adds persistent caching and
+ * a last-known-good fallback: on a failed refresh they return the previous
+ * successful result marked `stale` (when older than its refresh window) instead
+ * of nothing, so the UI keeps showing the last reading with a "not updated"
+ * indicator. Backed by `unstable_cache`, so the fallback survives serverless
+ * cold starts (unlike the previous in-memory store).
  */
-export const getWeather = (): Promise<Resilient<WeatherData>> =>
-  withLastKnownGood('weather', fetchWeather)
+export const getWeather = createResilientGetter<WeatherData>('weather', fetchWeather, {
+  revalidate: dataFetchConfig.weatherRevalidateSeconds,
+  staleMaxAgeSeconds: staleMaxAgeConfig.weather,
+})
 
-export const getFx = (): Promise<Resilient<FxData>> =>
-  withLastKnownGood('fx', fetchFx)
+export const getFx = createResilientGetter<FxData>('fx', fetchFx, {
+  revalidate: dataFetchConfig.fxRevalidateSeconds,
+  staleMaxAgeSeconds: staleMaxAgeConfig.fx,
+})
 
-export const getOutageSchedule = (): Promise<Resilient<OutageSchedule>> =>
-  withLastKnownGood('outage', fetchOutageSchedule)
+export const getOutageSchedule = createResilientGetter<OutageSchedule>('outage', fetchOutageSchedule, {
+  revalidate: dataFetchConfig.outageRevalidateSeconds,
+  staleMaxAgeSeconds: staleMaxAgeConfig.outage,
+})
 
-export const getBackupPower = (): Promise<Resilient<BackupPowerData>> =>
-  withLastKnownGood('backup', fetchBackupPower)
+export const getBackupPower = createResilientGetter<BackupPowerData>('backup', fetchBackupPower, {
+  revalidate: dataFetchConfig.backupRevalidateSeconds,
+  staleMaxAgeSeconds: staleMaxAgeConfig.backup,
+})
 
 /**
  * Fetch all dashboard data in parallel.

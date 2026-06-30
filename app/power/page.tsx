@@ -27,11 +27,14 @@ import { OutageRow } from '@/app/components/OutageDisplay'
 import './power.css'
 
 /**
- * Render dynamically on every request so each device refresh re-attempts the
- * upstream fetches. Per-fetch `next: { revalidate }` still caps how often the
- * external APIs are actually hit, so this does not hammer them.
+ * Render with ISR (5-minute window): the e-paper device always receives the
+ * last successfully rendered page instantly, and Next regenerates it in the
+ * background. A slow or failing upstream therefore never delays the device or
+ * blanks the screen. Per-section last-known-good (so a single failed source
+ * doesn't wipe its tile) is handled by the resilient getters in
+ * lib/data-fetchers.ts.
  */
-export const dynamic = 'force-dynamic'
+export const revalidate = 300
 
 export const metadata: Metadata = {
   title: 'E-Paper Dashboard',
