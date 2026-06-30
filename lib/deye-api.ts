@@ -6,8 +6,9 @@
  */
 
 import { createHash } from 'crypto'
-import { deyeConfig, dataFetchConfig, apiConfig } from './config'
+import { deyeConfig, apiConfig, fetchTimeoutConfig } from './config'
 import { logInfo, logError, logWarn, logDebug } from './logger'
+import { fetchWithTimeout } from './fetch-utils'
 import type { BackupPowerData, BatteryHistoryPoint, ChargingStatus } from './types'
 
 // =============================================================================
@@ -31,6 +32,10 @@ function hashPassword(password: string): string {
 
 /**
  * Get a valid access token, refreshing if necessary.
+ *
+ * Returns `null` only when credentials are not configured (a stable state).
+ * Throws on an actual authentication failure so the resilient getter can serve
+ * the last-known-good backup value instead of caching the failure.
  */
 async function getAccessToken(): Promise<string | null> {
   // Check if we have a valid cached token
@@ -49,7 +54,7 @@ async function getAccessToken(): Promise<string | null> {
   try {
     const url = `${deyeConfig.apiUrl}/v1.0/account/token?appId=${encodeURIComponent(deyeConfig.appId)}`
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -59,8 +64,7 @@ async function getAccessToken(): Promise<string | null> {
         email: deyeConfig.email,
         password: deyeConfig.hashedPassword || hashPassword(deyeConfig.password),
       }),
-      cache: 'no-store', // Don't cache auth requests
-    })
+    }, fetchTimeoutConfig.deyeMs)
 
     if (!response.ok) {
       throw new Error(`Auth failed with status ${response.status}`)
@@ -92,7 +96,7 @@ async function getAccessToken(): Promise<string | null> {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('deye', 'Authentication failed:', message)
     cachedToken = null
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }
 
@@ -195,7 +199,7 @@ async function fetchDeviceLatest(token: string): Promise<{
   try {
     const url = `${deyeConfig.apiUrl}/v1.0/device/latest`
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -204,8 +208,7 @@ async function fetchDeviceLatest(token: string): Promise<{
       body: JSON.stringify({
         deviceList: [deyeConfig.deviceSn],
       }),
-      next: { revalidate: dataFetchConfig.backupRevalidateSeconds },
-    })
+    }, fetchTimeoutConfig.deyeMs)
 
     if (!response.ok) {
       throw new Error(`Device latest API responded with ${response.status}`)
@@ -264,7 +267,7 @@ async function fetchDeviceLatest(token: string): Promise<{
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('deye', 'Failed to fetch device latest:', message)
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }
 
@@ -284,7 +287,7 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
     const endTimestamp = Math.floor(Date.now() / 1000)
     const startTimestamp = endTimestamp - 24 * 60 * 60
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -296,8 +299,7 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
         endTimestamp,
         measurePoints: ['SOC'], // Standard measurement point for state of charge
       }),
-      next: { revalidate: dataFetchConfig.backupHistoryRevalidateSeconds },
-    })
+    }, fetchTimeoutConfig.deyeMs)
 
     if (!response.ok) {
       throw new Error(`Device history API responded with ${response.status}`)
@@ -358,6 +360,10 @@ async function fetchDeviceHistory(token: string): Promise<BatteryHistoryPoint[]>
 
 /**
  * Fetch complete backup power data including current status and 24h history.
+ *
+ * Returns `null` only when Deye is not configured (a stable state; the page
+ * falls back to mock data). Throws on any real fetch failure so the resilient
+ * getter (`getBackupPower`) can serve the last-known-good value.
  */
 export async function fetchBackupPower(): Promise<BackupPowerData | null> {
   logInfo('deye', 'Fetching backup power data')
@@ -418,6 +424,6 @@ export async function fetchBackupPower(): Promise<BackupPowerData | null> {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError('deye', 'Failed to fetch backup power:', message)
-    return null
+    throw error instanceof Error ? error : new Error(message)
   }
 }

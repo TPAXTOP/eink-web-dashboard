@@ -16,11 +16,11 @@ import { formatRate, formatTime, formatDateTime, formatDateTimeShort } from '@/l
 import { FxChart } from './components/FxChart'
 import { StaleBadge } from './components/StaleBadge'
 
-// Force dynamic rendering to ensure fresh data on each request
-// This prevents build-time failures from being cached
-export const dynamic = 'force-dynamic'
-
-// Revalidate data every 30 minutes (matches weather interval)
+// Render with ISR: serve the last successfully rendered page instantly and
+// regenerate in the background. This keeps responses fast and never blanks the
+// page on a slow/failing upstream (Next keeps the last good page if a
+// background regeneration throws). Per-section last-known-good is handled by
+// the resilient getters in lib/data-fetchers.ts.
 export const revalidate = 1800
 
 export default async function DashboardPage() {

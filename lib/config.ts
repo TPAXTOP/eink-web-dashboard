@@ -46,6 +46,37 @@ export const dataFetchConfig = {
 }
 
 /**
+ * Per-request fetch timeouts (in milliseconds).
+ *
+ * No upstream may hang the request indefinitely; once a timeout elapses the
+ * fetch is aborted and treated as a failure, so the cached last-known-good
+ * value is served instead. These are the single biggest defense against the
+ * e-paper device timing out and rendering a blank screen.
+ */
+export const fetchTimeoutConfig = {
+  /** Weather, FX, and outage upstreams: single request each. */
+  defaultMs: 5000,
+  /** Each Deye Cloud call (token, device/latest, device/historyRaw). */
+  deyeMs: 6000,
+}
+
+/**
+ * Maximum age (in seconds) before displayed data is flagged "stale".
+ *
+ * `unstable_cache` serves the last successful value when a refresh fails, but
+ * hides whether the underlying call succeeded. We therefore infer staleness
+ * from the data's own `fetchedAt` timestamp: anything older than ~2x its
+ * revalidate window means refreshes have been failing. Used to drive the
+ * inline StaleBadge.
+ */
+export const staleMaxAgeConfig = {
+  weather: 2 * dataFetchConfig.weatherRevalidateSeconds, // 1 hour
+  fx: 2 * dataFetchConfig.fxRevalidateSeconds, // 24 hours
+  outage: 2 * dataFetchConfig.outageRevalidateSeconds, // 10 minutes
+  backup: 2 * dataFetchConfig.backupRevalidateSeconds, // 10 minutes
+}
+
+/**
  * Weather API configuration.
  */
 export const weatherConfig = {
